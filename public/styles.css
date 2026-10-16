@@ -352,32 +352,39 @@ details.mes-grupo > summary::-webkit-details-marker { display: none; }
 details.mes-grupo > summary span:first-child::before { content: "›"; display: inline-block; width: 1em; color: var(--tinta-3); transition: transform 0.15s ease; }
 details.mes-grupo[open] > summary span:first-child::before { transform: rotate(90deg); }
 
-/* ---------- gráfico único ---------- */
+/* ---------- gráfico do histórico ---------- */
 .s-prov { fill: var(--s-prov); background: var(--s-prov); }
 .s-acao { fill: var(--s-acao); background: var(--s-acao); }
 .s-fii { fill: var(--s-fii); background: var(--s-fii); }
 .s-outros { fill: var(--s-outros); background: var(--s-outros); }
 .s-tesouro { fill: var(--s-tes); background: var(--s-tes); }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.grafico-bloco { gap: 16px; }
+.graf-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.graf-controles { display: flex; gap: 8px; flex-wrap: wrap; }
 .filtros { display: flex; flex-wrap: wrap; gap: 6px; }
-.filtro { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--linha); background: var(--folha); color: var(--tinta); font-size: 0.84rem; font-weight: 500; cursor: pointer; }
+.filtro { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--linha); background: var(--folha); color: var(--tinta); font-size: 0.82rem; font-weight: 500; cursor: pointer; transition: opacity 0.15s ease; }
 .filtro:hover { border-color: var(--linha-forte); }
-.filtro[aria-pressed="false"] { color: var(--tinta-3); background: transparent; }
+.filtro[aria-pressed="false"] { color: var(--tinta-3); background: transparent; border-style: dashed; }
 .filtro[aria-pressed="false"] .sw { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tinta-3); }
-.graf-rolagem { overflow-x: auto; margin: 0 -18px; padding: 0 18px; scrollbar-width: thin; }
-.grafico-bloco .grafico { display: block; width: auto; max-width: none; }
+.graf-rolagem { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; border-radius: var(--raio); }
+.grafico-bloco .grafico { display: block; width: auto; height: auto; max-width: none; }
+.grafico .grade { stroke: var(--linha); stroke-width: 1; stroke-dasharray: 2 4; }
 .grafico .base { stroke: var(--linha-forte); stroke-width: 1; }
 .grafico .slot { cursor: pointer; }
-.grafico .alvo { fill: transparent; }
+.grafico .alvo { fill: transparent; transition: fill 0.15s ease; }
 .grafico .slot:hover .alvo { fill: var(--folha-2); }
-.grafico .slot.sel .alvo { fill: var(--folha-2); }
-.grafico text.v { fill: var(--tinta); font: 600 11px var(--f-texto); }
-.grafico text.v2 { fill: var(--tinta-2); font: 500 9.5px var(--f-texto); }
-.grafico text.x { fill: var(--tinta-3); font: 11px var(--f-texto); }
-.grafico .slot.sel text.x { fill: var(--tinta); font-weight: 600; }
-.graf-detalhe { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 0.86rem; color: var(--tinta-2); min-height: 1.6em; }
-.graf-detalhe b { color: var(--tinta); }
-.graf-detalhe span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.grafico .slot.sel .alvo { fill: var(--acento-suave); }
+.grafico text.v { fill: var(--tinta); font: 600 11px var(--f-texto); font-variant-numeric: tabular-nums; }
+.grafico text.v2 { fill: var(--tinta-2); font: 500 10px var(--f-texto); font-variant-numeric: tabular-nums; }
+.grafico text.x { fill: var(--tinta-3); font: 500 11px var(--f-texto); }
+.grafico .slot.sel text.x { fill: var(--tinta); font-weight: 700; }
+.graf-detalhe { display: grid; gap: 8px; padding: 12px 14px; border-radius: var(--raio); background: var(--folha-2); font-size: 0.86rem; }
+.det-cab { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.det-cab span { color: var(--tinta-2); }
+.det-itens { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--tinta-2); }
+.det-itens span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.det-itens b { color: var(--tinta); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* ---------- ordenar e arrastar ---------- */
 select.peq { height: 34px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; padding-left: 14px; }

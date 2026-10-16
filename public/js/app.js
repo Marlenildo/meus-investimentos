@@ -528,8 +528,9 @@ const SERIES = [
 ];
 const PILHA = ['acao', 'fii', 'outros', 'tesouro']; // de baixo para cima
 const GRAF_KEY = 'meus-investimentos:grafico';
-const PADRAO_GRAF = { periodo: 'mes', hist: ['prov', 'acao', 'fii', 'outros', 'tesouro'], prov: ['prov'], sel: {} };
+const PADRAO_GRAF = { periodo: 'mes', modo: 'periodo', hist: ['prov', 'acao', 'fii', 'outros', 'tesouro'], sel: null };
 let G = (() => { try { return { ...PADRAO_GRAF, ...JSON.parse(localStorage.getItem(GRAF_KEY) || '{}') }; } catch { return { ...PADRAO_GRAF }; } })();
+if (typeof G.sel !== 'number') G.sel = null;
 const salvarG = () => { try { localStorage.setItem(GRAF_KEY, JSON.stringify(G)); } catch { /* sem armazenamento */ } };
 
 const rotuloCurto = (chave, per) => per === 'ano' ? chave : per === 'mes' ? mesCurto(chave) : `${chave.slice(8, 10)}/${chave.slice(5, 7)}`;
@@ -554,100 +555,139 @@ function linhasDoGrafico(per) {
   return out;
 }
 
-function htmlGrafico(inst) {
+/** Barra com só os cantos de cima arredondados. */
+function barra(x, yTopo, w, h, r, cls) {
+  if (h <= 0) return '';
+  r = Math.min(r, w / 2, h);
+  return `<path class="${cls}" d="M${x},${yTopo + h}V${yTopo + r}Q${x},${yTopo} ${x + r},${yTopo}H${x + w - r}Q${x + w},${yTopo} ${x + w},${yTopo + r}V${yTopo + h}Z"/>`;
+}
+
+function htmlGrafico(largura) {
   const per = G.periodo;
-  const linhas = linhasDoGrafico(per);
+  const acum = G.modo === 'acumulado';
+  let linhas = linhasDoGrafico(per);
+  if (acum) {
+    const soma = { acao: 0, fii: 0, outros: 0, tesouro: 0, proventos: 0 };
+    linhas = linhas.map((l) => { for (const k of Object.keys(soma)) soma[k] += l[k]; return { ...l, ...soma }; });
+  }
   const presentes = SERIES.filter((x) => linhas.some((l) => (x.k === 'prov' ? l.proventos : l[x.k]) > 0));
-  const ativos = new Set((G[inst] || []).filter((k) => presentes.some((x) => x.k === k)));
+  const ativos = new Set((G.hist || []).filter((k) => presentes.some((x) => x.k === k)));
   const pilha = PILHA.filter((k) => ativos.has(k));
   const comProv = ativos.has('prov');
-  const valor = (l, k) => (k === 'prov' ? l.proventos : l[k]);
   const inv = (l) => pilha.reduce((s, k) => s + l[k], 0);
-  const totInv = linhas.reduce((s, l) => s + inv(l), 0);
-  const totProv = comProv ? linhas.reduce((s, l) => s + l.proventos, 0) : 0;
+  const brutas = linhasDoGrafico(per);
+  const totInv = brutas.reduce((s, l) => s + pilha.reduce((t, k) => t + l[k], 0), 0);
+  const totProv = comProv ? brutas.reduce((s, l) => s + l.proventos, 0) : 0;
 
+  // largura: cabe tudo na tela sempre que possível; só rola quando os períodos não cabem
   const n = linhas.length;
-  const largura = Math.max(300, ($('#conteudo')?.clientWidth || 900) - 40);
-  const slot = Math.max(per === 'ano' ? 88 : 60, n ? Math.min(220, largura / n) : 60);
-  const W = Math.max(320, Math.round(n * slot)), H = 250, topo = 40, base = 28;
-  const altura = H - topo - base;
+  const L = Math.max(280, Math.round(largura || 860));
+  const minimo = comProv && pilha.length ? 80 : 74; // espaço para o valor em reais escrito por extenso
+  const slot = n * minimo <= L ? L / Math.max(n, 1) : minimo;
+  const W = Math.round(n * slot);
+  const H = 280, topo = 46, base = 30;
+  const alt = H - topo - base;
   const maxV = Math.max(1, ...linhas.map((l) => Math.max(inv(l), comProv ? l.proventos : 0)));
-  const y = (v) => topo + altura * (1 - v / maxV);
+  const y = (v) => topo + alt * (1 - v / maxV);
   const duas = pilha.length && comProv;
-  const wInv = duas ? Math.min(26, slot * 0.4) : Math.min(34, slot * 0.5);
-  const wProv = duas ? Math.min(14, slot * 0.22) : wInv;
-  const sel = G.sel[inst] ?? n - 1;
+  const wInv = Math.min(56, Math.max(18, slot * (duas ? 0.38 : 0.5)));
+  const wProv = duas ? Math.min(30, Math.max(10, slot * 0.2)) : wInv;
+  const sel = Math.min(G.sel ?? n - 1, n - 1);
+  const grade = [0.25, 0.5, 0.75, 1].map((f) => `<line class="grade" x1="0" x2="${W}" y1="${topo + alt * (1 - f)}" y2="${topo + alt * (1 - f)}"/>`).join('');
+  const reais = (v) => R(v);
 
   const barras = linhas.map((l, i) => {
     const cx = i * slot + slot / 2;
-    const xInv = duas ? cx - (wInv + wProv + 3) / 2 : cx - wInv / 2;
-    const xProv = duas ? xInv + wInv + 3 : cx - wProv / 2;
+    const largGrupo = duas ? wInv + 4 + wProv : wInv;
+    const xInv = cx - largGrupo / 2;
+    const xProv = duas ? xInv + wInv + 4 : cx - wProv / 2;
     let acc = 0, segs = '';
-    for (const k of pilha) {
+    const visiveis = pilha.filter((k) => l[k] > 0);
+    visiveis.forEach((k, j) => {
       const v = l[k];
-      if (!v) continue;
       const y1 = y(acc + v), y0 = y(acc);
-      segs += `<rect class="s-${k}" x="${xInv}" y="${y1}" width="${wInv}" height="${Math.max(1, y0 - y1 - (acc ? 2 : 0))}" rx="2"/>`;
+      const ultimo = j === visiveis.length - 1;
+      const h = Math.max(1.5, y0 - y1 - (j ? 2 : 0));
+      segs += ultimo ? barra(xInv, y1, wInv, h, 5, `s-${k}`) : `<rect class="s-${k}" x="${xInv}" y="${y1}" width="${wInv}" height="${h}"/>`;
       acc += v;
-    }
-    const prov = comProv && l.proventos ? `<rect class="s-prov" x="${xProv}" y="${y(l.proventos)}" width="${wProv}" height="${Math.max(1, y(0) - y(l.proventos))}" rx="3"/>` : '';
+    });
+    const prov = comProv && l.proventos ? barra(xProv, y(l.proventos), wProv, y(0) - y(l.proventos), 4, 's-prov') : '';
     const topoBarra = Math.min(acc ? y(acc) : H, comProv && l.proventos ? y(l.proventos) : H);
     let rot = '';
-    if (acc && comProv && l.proventos) rot = `<text class="v" x="${cx}" y="${topoBarra - 18}" text-anchor="middle">${compacto(acc)}</text><text class="v2" x="${cx}" y="${topoBarra - 6}" text-anchor="middle">+${compacto(l.proventos)} prov.</text>`;
-    else if (acc) rot = `<text class="v" x="${cx}" y="${topoBarra - 6}" text-anchor="middle">${compacto(acc)}</text>`;
-    else if (comProv && l.proventos) rot = `<text class="v" x="${cx}" y="${topoBarra - 6}" text-anchor="middle">${compacto(l.proventos)}</text>`;
-    return `<g class="slot ${i === sel ? 'sel' : ''}" data-graf-slot="${i}" data-inst="${inst}">
-      <rect class="alvo" x="${i * slot}" y="0" width="${slot}" height="${H}"/>
+    if (acc && comProv && l.proventos) rot = `<text class="v" x="${cx}" y="${topoBarra - 22}" text-anchor="middle">${reais(acc)}</text><text class="v2" x="${cx}" y="${topoBarra - 8}" text-anchor="middle">+ ${reais(l.proventos)}</text>`;
+    else if (acc) rot = `<text class="v" x="${cx}" y="${topoBarra - 8}" text-anchor="middle">${reais(acc)}</text>`;
+    else if (comProv && l.proventos) rot = `<text class="v" x="${cx}" y="${topoBarra - 8}" text-anchor="middle">${reais(l.proventos)}</text>`;
+    return `<g class="slot ${i === sel ? 'sel' : ''}" data-graf-slot="${i}">
+      <rect class="alvo" x="${i * slot + 3}" y="4" width="${slot - 6}" height="${H - 8}" rx="10"/>
       ${segs}${prov}${rot}
-      <text class="x" x="${cx}" y="${H - 9}" text-anchor="middle">${rotuloCurto(l.chave, per)}</text>
+      <text class="x" x="${cx}" y="${H - 10}" text-anchor="middle">${rotuloCurto(l.chave, per)}</text>
     </g>`;
   }).join('');
 
   const l = linhas[sel];
-  const detalhe = l ? `<b>${rotuloLongo(l.chave, per)}</b>${[...pilha.map((k) => [SERIES.find((x) => x.k === k).nome, l[k], k]), ...(comProv ? [['Proventos', l.proventos, 'prov']] : [])]
-    .filter(([, v]) => v > 0).map(([nome, v, k]) => `<span><i class="sw s-${k}"></i>${nome} ${R(v)}</span>`).join('')}${pilha.length > 1 ? `<span>Investido ${R(inv(l))}</span>` : ''}${!inv(l) && !(comProv && l.proventos) ? '<span class="apagado">sem movimento</span>' : ''}` : '';
+  const itens = l ? [...pilha.map((k) => [SERIES.find((x) => x.k === k).nome, l[k], k]), ...(comProv ? [['Proventos', l.proventos, 'prov']] : [])].filter(([, v]) => v > 0) : [];
+  const detalhe = l ? `
+    <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(l.chave, per)}</b>${pilha.length ? `<span>Investido <b>${R(inv(l))}</b></span>` : ''}</div>
+    ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, k]) => `<span><i class="sw s-${k}"></i>${nome}<b>${R(v)}</b></span>`).join('')}</div>` : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}` : '';
 
   return `
-    <section class="bloco grafico-bloco" id="graf-${inst}">
-      <div class="bloco-cab">
-        <div><h2>${inst === 'prov' ? 'Proventos recebidos' : 'Quanto investi'}</h2>
-          <small class="sub-cab">${pilha.length ? `Investido <b>${R(totInv)}</b>` : ''}${pilha.length && comProv ? ' · ' : ''}${comProv ? `Proventos <b>${R(totProv)}</b>` : ''}</small></div>
-        <div class="seg" role="group" aria-label="Agrupar por">
-          ${[['dia', 'Dia'], ['mes', 'Mês'], ['ano', 'Ano']].map(([k, nm]) => `<button type="button" data-graf-periodo="${k}" data-inst="${inst}" aria-pressed="${per === k}">${nm}</button>`).join('')}
+    <section class="bloco grafico-bloco" id="graf-hist">
+      <div class="graf-topo">
+        <div>
+          <h2>${acum ? 'Total acumulado' : 'Quanto investi'}</h2>
+          <small class="sub-cab">${pilha.length ? `Investido <b>${R(totInv)}</b>` : ''}${pilha.length && comProv ? ' · ' : ''}${comProv ? `Proventos <b>${R(totProv)}</b>` : ''}</small>
+        </div>
+        <div class="graf-controles">
+          <div class="seg" role="group" aria-label="Mostrar">
+            ${[['periodo', 'No período'], ['acumulado', 'Acumulado']].map(([k, nm]) => `<button type="button" data-graf-modo="${k}" aria-pressed="${(G.modo || 'periodo') === k}">${nm}</button>`).join('')}
+          </div>
+          <div class="seg" role="group" aria-label="Agrupar por">
+            ${[['dia', 'Dia'], ['mes', 'Mês'], ['ano', 'Ano']].map(([k, nm]) => `<button type="button" data-graf-periodo="${k}" aria-pressed="${per === k}">${nm}</button>`).join('')}
+          </div>
         </div>
       </div>
       <div class="filtros" role="group" aria-label="Mostrar no gráfico">
-        ${presentes.map((x) => `<button type="button" class="filtro" data-graf-serie="${x.k}" data-inst="${inst}" aria-pressed="${ativos.has(x.k)}"><i class="sw s-${x.k}"></i>${x.nome}</button>`).join('')}
+        ${presentes.map((x) => `<button type="button" class="filtro" data-graf-serie="${x.k}" aria-pressed="${ativos.has(x.k)}"><i class="sw s-${x.k}"></i>${x.nome}</button>`).join('')}
       </div>
-      ${n ? `<div class="graf-rolagem"><svg class="grafico" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${inst === 'prov' ? 'Proventos' : 'Investimentos e proventos'} por ${per === 'mes' ? 'mês' : per}">
-        <line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}</svg></div>
-      <div class="graf-detalhe">${detalhe}</div>` : '<p class="dica">Ainda não há nada para mostrar.</p>'}
+      ${n ? `<div class="graf-rolagem" data-largura="${L}"><svg class="grafico" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Investimentos${comProv ? ' e proventos' : ''} por ${per === 'mes' ? 'mês' : per}${acum ? ', acumulado' : ''}">
+        ${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}</svg></div>
+      <div class="graf-detalhe">${detalhe}</div>` : '<p class="dica">Ainda não há compras nem proventos para mostrar.</p>'}
     </section>`;
 }
 
+function redesenharGrafico({ fim = false } = {}) {
+  const sec = $('#graf-hist');
+  if (!sec) return;
+  const rol = sec.querySelector('.graf-rolagem');
+  const pos = rol?.scrollLeft;
+  const largura = sec.clientWidth - 36;
+  sec.outerHTML = htmlGrafico(largura);
+  const nova = $('#graf-hist .graf-rolagem');
+  if (nova) nova.scrollLeft = fim ? nova.scrollWidth : pos;
+}
+
 function ligarGrafico() {
-  const rolar = () => document.querySelectorAll('.graf-rolagem').forEach((el) => { el.scrollLeft = el.scrollWidth; });
-  rolar();
+  // mede a largura real e redesenha para caber sem rolagem quando possível
+  redesenharGrafico({ fim: true });
   $('#conteudo').addEventListener('click', (e) => {
-    const t = e.target.closest('[data-graf-periodo],[data-graf-serie],[data-graf-slot]');
+    const t = e.target.closest('[data-graf-periodo],[data-graf-serie],[data-graf-slot],[data-graf-modo]');
     if (!t) return;
-    const inst = t.dataset.inst;
-    const sec = $(`#graf-${inst}`);
-    const pos = sec.querySelector('.graf-rolagem')?.scrollLeft;
-    if (t.dataset.grafPeriodo) { G.periodo = t.dataset.grafPeriodo; G.sel = {}; }
+    let fim = false;
+    if (t.dataset.grafPeriodo) { G.periodo = t.dataset.grafPeriodo; G.sel = null; fim = true; }
+    if (t.dataset.grafModo) { G.modo = t.dataset.grafModo; }
     if (t.dataset.grafSerie) {
-      const lista = new Set(G[inst]);
+      const lista = new Set(G.hist);
       lista.has(t.dataset.grafSerie) ? lista.delete(t.dataset.grafSerie) : lista.add(t.dataset.grafSerie);
       if (!lista.size) return; // sempre fica pelo menos uma série
-      G[inst] = [...lista];
+      G.hist = [...lista];
     }
-    if (t.dataset.grafSlot) G.sel[inst] = Number(t.dataset.grafSlot);
+    if (t.dataset.grafSlot) G.sel = Number(t.dataset.grafSlot);
     salvarG();
-    sec.outerHTML = htmlGrafico(inst);
-    const nova = $(`#graf-${inst} .graf-rolagem`);
-    if (nova) nova.scrollLeft = t.dataset.grafPeriodo ? nova.scrollWidth : pos;
+    redesenharGrafico({ fim });
   });
 }
+let redimT;
+window.addEventListener('resize', () => { clearTimeout(redimT); redimT = setTimeout(() => redesenharGrafico(), 150); });
 
 function ligarHistorico() {
   ligarRemover('data-del-compra', 'compras');
@@ -675,7 +715,7 @@ function renderCarteira() {
       <div class="kpi"><small>Proventos recebidos</small><span class="num">${R(c.proventos)}</span></div>
     </div>
 
-    ${htmlGrafico('hist')}
+    ${htmlGrafico()}
 
 
     <section class="bloco">
@@ -738,8 +778,6 @@ function renderProventos() {
       </form>
     </section>
 
-    ${htmlGrafico('prov')}
-
     ${totalAno ? `<p class="dica">Em ${ano}: <b>${R(totalAno)}</b> — ${Object.entries(doAno).map(([k, v]) => `${esc(TIPOS_PROVENTO[k] || k)} ${R(v)}`).join(' · ')}</p>` : ''}
 
     ${S.proventos.length ? `<section class="bloco"><h2>Recebidos</h2>
@@ -771,7 +809,6 @@ function ligarProventos() {
     persist(); render(); toast('Provento lançado.');
   });
   ligarRemover('data-del-prov', 'proventos');
-  ligarGrafico();
 }
 
 // ---------- aba Ajustes ----------

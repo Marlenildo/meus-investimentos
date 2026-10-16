@@ -30,6 +30,7 @@
   --topo-bg: rgba(245, 246, 250, 0.82);
   --sombra: 0 1px 2px rgba(18, 20, 28, 0.04), 0 8px 24px -12px rgba(18, 20, 28, 0.12);
   --brilho: 0.35;
+  --s-prov: #2f9e5f; --s-acao: #7c5cff; --s-fii: #0e9fbf; --s-outros: #d6457f; --s-tes: #c98a1e;
 
   --f-display: "Sora", "Inter", system-ui, sans-serif;
   --f-texto: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -57,6 +58,7 @@
     --topo-bg: rgba(10, 11, 16, 0.80);
     --sombra: 0 20px 50px -24px rgba(0, 0, 0, 0.7);
     --brilho: 1;
+    --s-prov: #2c9a5b; --s-acao: #8064ff; --s-fii: #1596b3; --s-outros: #d0447f; --s-tes: #b9821c;
     color-scheme: dark;
   }
 }
@@ -75,6 +77,7 @@
   --topo-bg: rgba(10, 11, 16, 0.80);
   --sombra: 0 20px 50px -24px rgba(0, 0, 0, 0.7);
   --brilho: 1;
+  --s-prov: #2c9a5b; --s-acao: #8064ff; --s-fii: #1596b3; --s-outros: #d0447f; --s-tes: #b9821c;
   color-scheme: dark;
 }
 
@@ -348,3 +351,37 @@ details.mes-grupo > summary { list-style: none; cursor: pointer; }
 details.mes-grupo > summary::-webkit-details-marker { display: none; }
 details.mes-grupo > summary span:first-child::before { content: "›"; display: inline-block; width: 1em; color: var(--tinta-3); transition: transform 0.15s ease; }
 details.mes-grupo[open] > summary span:first-child::before { transform: rotate(90deg); }
+
+/* ---------- gráfico único ---------- */
+.s-prov { fill: var(--s-prov); background: var(--s-prov); }
+.s-acao { fill: var(--s-acao); background: var(--s-acao); }
+.s-fii { fill: var(--s-fii); background: var(--s-fii); }
+.s-outros { fill: var(--s-outros); background: var(--s-outros); }
+.s-tesouro { fill: var(--s-tes); background: var(--s-tes); }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.filtros { display: flex; flex-wrap: wrap; gap: 6px; }
+.filtro { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--linha); background: var(--folha); color: var(--tinta); font-size: 0.84rem; font-weight: 500; cursor: pointer; }
+.filtro:hover { border-color: var(--linha-forte); }
+.filtro[aria-pressed="false"] { color: var(--tinta-3); background: transparent; }
+.filtro[aria-pressed="false"] .sw { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tinta-3); }
+.graf-rolagem { overflow-x: auto; margin: 0 -18px; padding: 0 18px; scrollbar-width: thin; }
+.grafico-bloco .grafico { display: block; width: auto; max-width: none; }
+.grafico .base { stroke: var(--linha-forte); stroke-width: 1; }
+.grafico .slot { cursor: pointer; }
+.grafico .alvo { fill: transparent; }
+.grafico .slot:hover .alvo { fill: var(--folha-2); }
+.grafico .slot.sel .alvo { fill: var(--folha-2); }
+.grafico text.v { fill: var(--tinta); font: 600 11px var(--f-texto); }
+.grafico text.v2 { fill: var(--tinta-2); font: 500 9.5px var(--f-texto); }
+.grafico text.x { fill: var(--tinta-3); font: 11px var(--f-texto); }
+.grafico .slot.sel text.x { fill: var(--tinta); font-weight: 600; }
+.graf-detalhe { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 0.86rem; color: var(--tinta-2); min-height: 1.6em; }
+.graf-detalhe b { color: var(--tinta); }
+.graf-detalhe span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+/* ---------- ordenar e arrastar ---------- */
+select.peq { height: 34px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; padding-left: 14px; }
+.arrasto { flex: none; width: 22px; height: 28px; margin-left: -6px; display: inline-grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--tinta-3); cursor: grab; touch-action: none; }
+.arrasto:hover { color: var(--tinta); background: var(--folha-2); }
+.arrasto:active { cursor: grabbing; }
+.ordem.arrastando { background: var(--folha-2); border-radius: var(--raio); box-shadow: var(--sombra); opacity: 0.95; }

@@ -196,28 +196,60 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
 
 // ---------- importar a planilha antiga (só tem o valor gasto por mês) ----------
 /**
- * Estima a quantidade comprada a partir do valor gasto (com a taxa da B3 incluída)
- * e da faixa de preço daquele mês (mínima/máxima/fechamento).
- * Preços na bolsa andam de centavo em centavo: entre as quantidades possíveis,
- * fica a que dá um preço "redondo" e mais perto do fechamento do mês.
+ * Descobre quantas cotas foram compradas a partir do valor gasto (com a taxa incluída).
+ * Na bolsa, o preço anda de centavo em centavo e a taxa da B3 é ~0,03% do valor.
+ * Então procuramos a quantidade q, o preço p (em centavos, dentro da faixa de preço do mês)
+ * e a taxa t (em centavos) tais que q × p + t = valor, ao centavo, com t o mais perto de 0,033%.
+ *
+ * ref: { low, high, close } do mês, já corrigidos por desdobramentos (como o Yahoo entrega).
+ * fatores: quantas ações de hoje vale 1 ação comprada naquele mês (desdobramentos depois da compra).
+ * Devolve a quantidade e o preço em ações de hoje.
  */
-export function estimarCompra(valor, ref) {
-  const liquido = valor / (1 + TAXA_B3_PADRAO);
+export const TAXA_NUBANK_OBSERVADA = 0.00033;
+
+export function estimarCompra(valor, ref, fatores = [1]) {
   if (!ref || !(ref.low > 0) || !(ref.high > 0)) return null;
-  const alvo = ref.close > 0 ? ref.close : (ref.low + ref.high) / 2;
-  const qmin = Math.max(1, Math.ceil(liquido / (ref.high * 1.04)));
-  const qmax = Math.max(qmin, Math.floor(liquido / (ref.low * 0.96)));
-  const centavos = (x) => Math.abs(x * 100 - Math.round(x * 100));
+  const vc = Math.round(valor * 100);
   let melhor = null;
-  for (let q = qmin; q <= Math.min(qmax, qmin + 20000); q++) {
-    const p = liquido / q;
-    const redondo = Math.min(centavos(p), centavos(valor / q)) < 0.06 ? 0 : 0.5;
-    const nota = redondo + Math.abs(p - alvo) / alvo;
-    if (!melhor || nota < melhor.nota) melhor = { q, nota };
+  for (const fator of fatores) {
+    const lo = Math.floor(ref.low * fator * 100 * 0.995);   // faixa do mês no preço da época, em centavos
+    const hi = Math.ceil(ref.high * fator * 100 * 1.005);
+    const alvo = (ref.close > 0 ? ref.close : (ref.low + ref.high) / 2) * fator * 100;
+    const qmin = Math.max(1, Math.floor(vc / (hi * 1.0006)));
+    const qmax = Math.max(qmin, Math.ceil(vc / lo));
+    const tmax = Math.max(2, Math.ceil(vc * 0.0006));
+    for (let q = qmin; q <= Math.min(qmax, qmin + 50000); q++) {
+      for (let t = 0; t <= tmax; t++) {
+        const g = vc - t;
+        if (g % q) continue;
+        const p = g / q;
+        if (p < lo || p > hi) continue;
+        const esperado = g * TAXA_NUBANK_OBSERVADA;
+        const nota = Math.abs(t - esperado) + Math.abs(p - alvo) / alvo * 0.5; // a taxa decide; o preço desempata
+        if (!melhor || nota < melhor.nota) melhor = { q, p, t, fator, nota };
+      }
+    }
   }
-  const qtd = melhor ? melhor.q : Math.max(1, Math.round(liquido / alvo));
-  const preco = Math.round((liquido / qtd) * 10000) / 10000;
-  return { qtd, preco, custo: Math.round((valor - qtd * preco) * 1e6) / 1e6 }; // fecha o valor da planilha ao centavo
+  if (melhor && melhor.nota < Math.max(3, vc * 0.0002)) {
+    const qtd = Math.round(melhor.q * melhor.fator * 10000) / 10000;
+    return { qtd, preco: Math.round(((vc - melhor.t) / 100 / qtd) * 1e6) / 1e6, custo: melhor.t / 100, exato: true, qtdOriginal: melhor.q, precoOriginal: melhor.p / 100 };
+  }
+  // não fechou ao centavo (ex.: duas compras no mesmo mês a preços diferentes): aproxima pelo fechamento
+  const fator = fatores[0];
+  const liquido = valor / (1 + TAXA_NUBANK_OBSERVADA);
+  const alvo = (ref.close > 0 ? ref.close : (ref.low + ref.high) / 2) * fator;
+  const q = Math.max(1, Math.round(liquido / alvo));
+  const qtd = Math.round(q * fator * 10000) / 10000;
+  const preco = Math.round((liquido / qtd) * 1e6) / 1e6;
+  return { qtd, preco, custo: Math.round((valor - qtd * preco) * 1e6) / 1e6, exato: false, qtdOriginal: q };
+}
+
+/** Fatores de desdobramento possíveis para uma compra feita no mês `ym`. */
+export function fatoresDoMes(ym, splits = []) {
+  const ini = `${ym}-01`, fim = `${ym}-31`;
+  const depois = (d) => splits.filter((s) => s.data > d).reduce((f, s) => f * s.fator, 1);
+  const f1 = depois(ini), f2 = depois(fim);
+  return f1 === f2 ? [f1] : [f1, f2];
 }
 
 // Selic média de cada ano, para trazer o preço atual do Tesouro Selic até a data da compra.

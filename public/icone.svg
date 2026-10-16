@@ -1,11 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Meus Investimentos: pilhas de aportes que crescem mês a mês e a moeda do próximo aporte -->
-  <rect width="512" height="512" rx="116" fill="#0B6B5C"/>
-  <rect x="82" y="321" width="100" height="44" rx="22" fill="#EAF4F0" opacity="0.55"/>
-  <rect x="206" y="321" width="100" height="44" rx="22" fill="#EAF4F0" opacity="0.78"/>
-  <rect x="206" y="267" width="100" height="44" rx="22" fill="#EAF4F0" opacity="0.78"/>
-  <rect x="330" y="321" width="100" height="44" rx="22" fill="#EAF4F0" opacity="1"/>
-  <rect x="330" y="267" width="100" height="44" rx="22" fill="#EAF4F0" opacity="1"/>
-  <rect x="330" y="213" width="100" height="44" rx="22" fill="#EAF4F0" opacity="1"/>
-  <rect x="330" y="147" width="100" height="44" rx="22" fill="#F2C14E"/>
+  <!-- Meus Investimentos: pilhas de aportes que crescem mês a mês e a moeda do próximo aporte.
+       Cores de marlenildo.online: fundo escuro e o gradiente violeta → ciano. -->
+  <defs>
+    <linearGradient id="g" x1="82" y1="365" x2="430" y2="147" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7c5cff"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <radialGradient id="brilho" cx="0.2" cy="0.1" r="0.9">
+      <stop offset="0" stop-color="#2a2160"/>
+      <stop offset="1" stop-color="#0a0b10"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#brilho)"/>
+  <g fill="url(#g)">
+    <rect x="82" y="321" width="100" height="44" rx="22"/>
+    <rect x="206" y="321" width="100" height="44" rx="22"/>
+    <rect x="206" y="267" width="100" height="44" rx="22"/>
+    <rect x="330" y="321" width="100" height="44" rx="22"/>
+    <rect x="330" y="267" width="100" height="44" rx="22"/>
+    <rect x="330" y="213" width="100" height="44" rx="22"/>
+  </g>
+  <rect x="330" y="147" width="100" height="44" rx="22" fill="#eef0f6"/>
 </svg>

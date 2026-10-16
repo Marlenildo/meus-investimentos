@@ -1,6 +1,6 @@
 import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
-  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, estimarCompra, precoTesouroEm,
+  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, estimarCompra, fatoresDoMes, precoTesouroEm,
 } from './calc.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
@@ -147,7 +147,7 @@ function htmlOrdem(a, pos) {
   return `
     <div class="ordem ${q > 0 ? 'tem-qtd' : ''}" data-id="${a.id}">
       <div class="ordem-ativo">
-        <div class="linha1"><span class="tk" title="${esc(a.nome || a.ticker)}">${esc(a.ticker)}</span><span class="chip ${a.tipo}">${esc(TIPOS[a.tipo]?.nome || a.tipo)}</span></div>
+        <div class="linha1"><button type="button" class="arrasto" data-arrasto="${a.id}" title="Arraste para mudar a ordem" aria-label="Mover ${esc(a.ticker)} (setas para cima e para baixo)"><svg viewBox="0 0 10 16" width="10" height="16"><g fill="currentColor"><circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="8" r="1.5"/><circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13" r="1.5"/><circle cx="7.5" cy="13" r="1.5"/></g></svg></button><span class="tk" title="${esc(a.nome || a.ticker)}">${esc(a.ticker)}</span><span class="chip ${a.tipo}">${esc(TIPOS[a.tipo]?.nome || a.tipo)}</span></div>
         ${htmlPosicao(pos)}
       </div>
       <div class="ordem-preco">
@@ -223,7 +223,7 @@ function renderComprar() {
   const auto = proventosAuto();
   const manual = S.plano.proventosManual != null;
   const cart = posicoes();
-  const ordem = [...S.ativos].sort((x, y) => (cart.porTicker.get(y.ticker)?.qtd ? 1 : 0) - (cart.porTicker.get(x.ticker)?.qtd ? 1 : 0));
+  const ordem = S.ativos;
   return `
     <section class="bloco">
       <div class="campos">
@@ -243,6 +243,9 @@ function renderComprar() {
       <div class="bloco-cab">
         <div><h2>Meus ativos</h2>${htmlSubCarteira(cart)}</div>
         <div class="acoes">
+          <select id="ordenar" class="peq" aria-label="Ordenar a lista">
+            <option value="">Ordenar…</option><option value="tipo">Por tipo</option><option value="az">A → Z</option><option value="posicao">Maior posição</option>
+          </select>
           <button type="button" class="btn peq" id="btn-dividir" title="Divide o valor igualmente entre os ativos">Dividir igual</button>
           <button type="button" class="btn peq" id="btn-limpar">Zerar</button>
           <button type="button" class="icone-btn ${atualizando ? 'girando' : ''}" id="btn-cotacoes" title="Atualizar preços" aria-label="Atualizar preços">${ICONE_ATUALIZAR}</button>
@@ -377,6 +380,60 @@ function ligarComprar() {
     }
   });
   ligarRemover('data-del-ativo', 'ativos');
+
+  // ordenar de uma vez (vira a nova ordem da lista; dá para ajustar arrastando)
+  $('#ordenar').addEventListener('change', (e) => {
+    const modo = e.target.value;
+    if (!modo) return;
+    const cart = posicoes();
+    const ordemTipo = Object.keys(TIPOS);
+    const valorDe = (a) => cart.porTicker.get(a.ticker)?.valorAtual ?? cart.porTicker.get(a.ticker)?.investido ?? 0;
+    S.ativos.sort((x, y) => modo === 'az' ? x.ticker.localeCompare(y.ticker, 'pt-BR')
+      : modo === 'tipo' ? (ordemTipo.indexOf(x.tipo) - ordemTipo.indexOf(y.tipo)) || x.ticker.localeCompare(y.ticker, 'pt-BR')
+      : valorDe(y) - valorDe(x));
+    persist('ativos'); render();
+  });
+
+  // arrastar e soltar pela alça (mouse e toque); setas do teclado na alça também movem
+  const lista = $('.ordens');
+  const salvarOrdem = () => {
+    const ids = [...lista.children].map((el) => el.dataset.id);
+    S.ativos.sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id));
+    persist('ativos');
+  };
+  lista?.addEventListener('pointerdown', (e) => {
+    const alca = e.target.closest('.arrasto');
+    if (!alca) return;
+    e.preventDefault();
+    const linha = alca.closest('.ordem');
+    linha.classList.add('arrastando');
+    alca.setPointerCapture(e.pointerId);
+    const mover = (ev) => {
+      const alvo = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.ordem');
+      if (!alvo || alvo === linha || alvo.parentElement !== lista) return;
+      const r = alvo.getBoundingClientRect();
+      lista.insertBefore(linha, ev.clientY > r.top + r.height / 2 ? alvo.nextSibling : alvo);
+    };
+    const soltar = () => {
+      alca.removeEventListener('pointermove', mover);
+      linha.classList.remove('arrastando');
+      salvarOrdem();
+    };
+    alca.addEventListener('pointermove', mover);
+    alca.addEventListener('pointerup', soltar, { once: true });
+    alca.addEventListener('pointercancel', soltar, { once: true });
+  });
+  lista?.addEventListener('keydown', (e) => {
+    const alca = e.target.closest('.arrasto');
+    if (!alca || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+    e.preventDefault();
+    const i = S.ativos.findIndex((a) => a.id === alca.dataset.arrasto);
+    const j = e.key === 'ArrowUp' ? i - 1 : i + 1;
+    if (j < 0 || j >= S.ativos.length) return;
+    [S.ativos[i], S.ativos[j]] = [S.ativos[j], S.ativos[i]];
+    persist('ativos'); render();
+    $(`[data-arrasto="${alca.dataset.arrasto}"]`)?.focus();
+  });
   pintarTotais();
 }
 
@@ -461,71 +518,140 @@ function abrirRegistrar() {
 }
 
 // ---------- aba Carteira ----------
-// ---------- quanto investi: por dia, mês ou ano ----------
-const PERIODO_KEY = 'meus-investimentos:periodo';
-let periodo = (() => { try { return localStorage.getItem(PERIODO_KEY) || 'mes'; } catch { return 'mes'; } })();
+// ---------- um gráfico só: investido por tipo + proventos, por dia, mês ou ano ----------
+const SERIES = [
+  { k: 'prov', nome: 'Proventos' },
+  { k: 'acao', nome: 'Ações' },
+  { k: 'fii', nome: 'FIIs' },
+  { k: 'outros', nome: 'ETF/BDR' },
+  { k: 'tesouro', nome: 'Tesouro' },
+];
+const PILHA = ['acao', 'fii', 'outros', 'tesouro']; // de baixo para cima
+const GRAF_KEY = 'meus-investimentos:grafico';
+const PADRAO_GRAF = { periodo: 'mes', hist: ['prov', 'acao', 'fii', 'outros', 'tesouro'], prov: ['prov'], sel: {} };
+let G = (() => { try { return { ...PADRAO_GRAF, ...JSON.parse(localStorage.getItem(GRAF_KEY) || '{}') }; } catch { return { ...PADRAO_GRAF }; } })();
+const salvarG = () => { try { localStorage.setItem(GRAF_KEY, JSON.stringify(G)); } catch { /* sem armazenamento */ } };
+
 const rotuloCurto = (chave, per) => per === 'ano' ? chave : per === 'mes' ? mesCurto(chave) : `${chave.slice(8, 10)}/${chave.slice(5, 7)}`;
 const rotuloLongo = (chave, per) => per === 'ano' ? chave : per === 'mes' ? nomeMesAno(chave).replace(/^./, (c) => c.toUpperCase()) : dataBR(chave);
+const compacto = (v) => v >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: v >= 10000 ? 0 : 1 })} mil` : Math.round(v).toLocaleString('pt-BR');
 
-function graficoPeriodo(linhas, per) {
-  const pts = linhas.slice(-12);
-  if (!pts.length) return '';
-  const W = 640, H = 230, pl = 64, pr = 12, pt = 14, pb = 30;
-  const maxV = Math.max(...pts.map((p) => p.total), 1);
-  const passoY = niceStep(maxV / 4);
-  const topo = Math.ceil(maxV / passoY) * passoY;
-  const y = (v) => pt + (H - pt - pb) * (1 - v / topo);
-  const bw = (W - pl - pr) / pts.length;
-  const ticks = [];
-  for (let v = 0; v <= topo + 1e-6; v += passoY) ticks.push(v);
-  const curto = (v) => v >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : v.toLocaleString('pt-BR');
-  const cx = (i) => pl + i * bw + bw / 2;
-  return `
-    <svg class="grafico" viewBox="0 0 ${W} ${H}" role="img" aria-label="Quanto investi em cada período">
-      <defs><linearGradient id="grad-barra" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
-      ${ticks.map((v) => `<line class="grade" x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}"/><text x="${pl - 8}" y="${y(v) + 4}" text-anchor="end">${curto(v)}</text>`).join('')}
-      ${pts.map((p, i) => `<rect class="barra-g" x="${pl + i * bw + bw * 0.2}" y="${y(p.total)}" width="${bw * 0.6}" height="${Math.max(0, y(0) - y(p.total))}" rx="4"><title>${rotuloLongo(p.chave, per)}: ${R(p.total)}</title></rect>
-        <text x="${cx(i)}" y="${H - 9}" text-anchor="middle">${rotuloCurto(p.chave, per)}</text>`).join('')}
-    </svg>`;
+/** Todos os meses (ou anos) do primeiro registro até hoje, inclusive os vazios. Dias: só os que tiveram movimento. */
+function linhasDoGrafico(per) {
+  const ls = resumoPorPeriodo(S.compras, S.proventos, per);
+  if (per === 'dia' || !ls.length) return ls;
+  const mapa = new Map(ls.map((l) => [l.chave, l]));
+  const vazio = (k) => ({ chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0 });
+  const out = [];
+  const hoje = per === 'ano' ? hojeISO().slice(0, 4) : mesDe(hojeISO());
+  let k = ls[0].chave;
+  const fim = ls[ls.length - 1].chave > hoje ? ls[ls.length - 1].chave : hoje;
+  while (k <= fim) {
+    out.push(mapa.get(k) || vazio(k));
+    if (per === 'ano') k = String(Number(k) + 1);
+    else { const [y, m] = k.split('-').map(Number); k = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`; }
+  }
+  return out;
 }
 
-function htmlQuantoInvesti() {
-  const linhas = resumoPorPeriodo(S.compras, S.proventos, periodo);
-  const tem = (k) => linhas.some((l) => l[k] > 0);
-  const cols = [['acao', 'Ações'], ['fii', 'FIIs'], ['tesouro', 'Tesouro'], ['outros', 'ETF/BDR']].filter(([k]) => tem(k));
-  const soma = (k) => round2(linhas.reduce((s, l) => s + l[k], 0));
-  const nomePer = { dia: 'dia', mes: 'mês', ano: 'ano' }[periodo];
+function htmlGrafico(inst) {
+  const per = G.periodo;
+  const linhas = linhasDoGrafico(per);
+  const presentes = SERIES.filter((x) => linhas.some((l) => (x.k === 'prov' ? l.proventos : l[x.k]) > 0));
+  const ativos = new Set((G[inst] || []).filter((k) => presentes.some((x) => x.k === k)));
+  const pilha = PILHA.filter((k) => ativos.has(k));
+  const comProv = ativos.has('prov');
+  const valor = (l, k) => (k === 'prov' ? l.proventos : l[k]);
+  const inv = (l) => pilha.reduce((s, k) => s + l[k], 0);
+  const totInv = linhas.reduce((s, l) => s + inv(l), 0);
+  const totProv = comProv ? linhas.reduce((s, l) => s + l.proventos, 0) : 0;
+
+  const n = linhas.length;
+  const largura = Math.max(300, ($('#conteudo')?.clientWidth || 900) - 40);
+  const slot = Math.max(per === 'ano' ? 88 : 60, n ? Math.min(220, largura / n) : 60);
+  const W = Math.max(320, Math.round(n * slot)), H = 250, topo = 40, base = 28;
+  const altura = H - topo - base;
+  const maxV = Math.max(1, ...linhas.map((l) => Math.max(inv(l), comProv ? l.proventos : 0)));
+  const y = (v) => topo + altura * (1 - v / maxV);
+  const duas = pilha.length && comProv;
+  const wInv = duas ? Math.min(26, slot * 0.4) : Math.min(34, slot * 0.5);
+  const wProv = duas ? Math.min(14, slot * 0.22) : wInv;
+  const sel = G.sel[inst] ?? n - 1;
+
+  const barras = linhas.map((l, i) => {
+    const cx = i * slot + slot / 2;
+    const xInv = duas ? cx - (wInv + wProv + 3) / 2 : cx - wInv / 2;
+    const xProv = duas ? xInv + wInv + 3 : cx - wProv / 2;
+    let acc = 0, segs = '';
+    for (const k of pilha) {
+      const v = l[k];
+      if (!v) continue;
+      const y1 = y(acc + v), y0 = y(acc);
+      segs += `<rect class="s-${k}" x="${xInv}" y="${y1}" width="${wInv}" height="${Math.max(1, y0 - y1 - (acc ? 2 : 0))}" rx="2"/>`;
+      acc += v;
+    }
+    const prov = comProv && l.proventos ? `<rect class="s-prov" x="${xProv}" y="${y(l.proventos)}" width="${wProv}" height="${Math.max(1, y(0) - y(l.proventos))}" rx="3"/>` : '';
+    const topoBarra = Math.min(acc ? y(acc) : H, comProv && l.proventos ? y(l.proventos) : H);
+    let rot = '';
+    if (acc && comProv && l.proventos) rot = `<text class="v" x="${cx}" y="${topoBarra - 18}" text-anchor="middle">${compacto(acc)}</text><text class="v2" x="${cx}" y="${topoBarra - 6}" text-anchor="middle">+${compacto(l.proventos)} prov.</text>`;
+    else if (acc) rot = `<text class="v" x="${cx}" y="${topoBarra - 6}" text-anchor="middle">${compacto(acc)}</text>`;
+    else if (comProv && l.proventos) rot = `<text class="v" x="${cx}" y="${topoBarra - 6}" text-anchor="middle">${compacto(l.proventos)}</text>`;
+    return `<g class="slot ${i === sel ? 'sel' : ''}" data-graf-slot="${i}" data-inst="${inst}">
+      <rect class="alvo" x="${i * slot}" y="0" width="${slot}" height="${H}"/>
+      ${segs}${prov}${rot}
+      <text class="x" x="${cx}" y="${H - 9}" text-anchor="middle">${rotuloCurto(l.chave, per)}</text>
+    </g>`;
+  }).join('');
+
+  const l = linhas[sel];
+  const detalhe = l ? `<b>${rotuloLongo(l.chave, per)}</b>${[...pilha.map((k) => [SERIES.find((x) => x.k === k).nome, l[k], k]), ...(comProv ? [['Proventos', l.proventos, 'prov']] : [])]
+    .filter(([, v]) => v > 0).map(([nome, v, k]) => `<span><i class="sw s-${k}"></i>${nome} ${R(v)}</span>`).join('')}${pilha.length > 1 ? `<span>Investido ${R(inv(l))}</span>` : ''}${!inv(l) && !(comProv && l.proventos) ? '<span class="apagado">sem movimento</span>' : ''}` : '';
+
   return `
-    <section class="bloco" id="quanto-investi">
+    <section class="bloco grafico-bloco" id="graf-${inst}">
       <div class="bloco-cab">
-        <h2>Quanto investi por ${nomePer}</h2>
+        <div><h2>${inst === 'prov' ? 'Proventos recebidos' : 'Quanto investi'}</h2>
+          <small class="sub-cab">${pilha.length ? `Investido <b>${R(totInv)}</b>` : ''}${pilha.length && comProv ? ' · ' : ''}${comProv ? `Proventos <b>${R(totProv)}</b>` : ''}</small></div>
         <div class="seg" role="group" aria-label="Agrupar por">
-          ${[['dia', 'Dia'], ['mes', 'Mês'], ['ano', 'Ano']].map(([k, n]) => `<button type="button" data-periodo="${k}" aria-pressed="${periodo === k}">${n}</button>`).join('')}
+          ${[['dia', 'Dia'], ['mes', 'Mês'], ['ano', 'Ano']].map(([k, nm]) => `<button type="button" data-graf-periodo="${k}" data-inst="${inst}" aria-pressed="${per === k}">${nm}</button>`).join('')}
         </div>
       </div>
-      ${graficoPeriodo(linhas, periodo)}
-      <div class="tabela-wrap"><table>
-        <thead><tr><th>${nomePer[0].toUpperCase() + nomePer.slice(1)}</th>${cols.map(([, n]) => `<th class="r">${n}</th>`).join('')}<th class="r">Total investido</th><th class="r">Proventos</th><th class="r">Acumulado</th></tr></thead>
-        <tbody>${[...linhas].reverse().map((l) => `<tr>
-          <td>${rotuloLongo(l.chave, periodo)}</td>
-          ${cols.map(([k]) => `<td class="r num">${l[k] ? R(l[k]) : '<span class="apagado">—</span>'}</td>`).join('')}
-          <td class="r num"><b>${R(l.total)}</b></td>
-          <td class="r num">${l.proventos ? R(l.proventos) : '<span class="apagado">—</span>'}</td>
-          <td class="r num">${R(l.acumulado)}</td></tr>`).join('')}</tbody>
-        <tfoot><tr><td>Total</td>${cols.map(([k]) => `<td class="r num">${R(soma(k))}</td>`).join('')}<td class="r num">${R(soma('total'))}</td><td class="r num">${R(soma('proventos'))}</td><td></td></tr></tfoot>
-      </table></div>
+      <div class="filtros" role="group" aria-label="Mostrar no gráfico">
+        ${presentes.map((x) => `<button type="button" class="filtro" data-graf-serie="${x.k}" data-inst="${inst}" aria-pressed="${ativos.has(x.k)}"><i class="sw s-${x.k}"></i>${x.nome}</button>`).join('')}
+      </div>
+      ${n ? `<div class="graf-rolagem"><svg class="grafico" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${inst === 'prov' ? 'Proventos' : 'Investimentos e proventos'} por ${per === 'mes' ? 'mês' : per}">
+        <line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}</svg></div>
+      <div class="graf-detalhe">${detalhe}</div>` : '<p class="dica">Ainda não há nada para mostrar.</p>'}
     </section>`;
+}
+
+function ligarGrafico() {
+  const rolar = () => document.querySelectorAll('.graf-rolagem').forEach((el) => { el.scrollLeft = el.scrollWidth; });
+  rolar();
+  $('#conteudo').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-graf-periodo],[data-graf-serie],[data-graf-slot]');
+    if (!t) return;
+    const inst = t.dataset.inst;
+    const sec = $(`#graf-${inst}`);
+    const pos = sec.querySelector('.graf-rolagem')?.scrollLeft;
+    if (t.dataset.grafPeriodo) { G.periodo = t.dataset.grafPeriodo; G.sel = {}; }
+    if (t.dataset.grafSerie) {
+      const lista = new Set(G[inst]);
+      lista.has(t.dataset.grafSerie) ? lista.delete(t.dataset.grafSerie) : lista.add(t.dataset.grafSerie);
+      if (!lista.size) return; // sempre fica pelo menos uma série
+      G[inst] = [...lista];
+    }
+    if (t.dataset.grafSlot) G.sel[inst] = Number(t.dataset.grafSlot);
+    salvarG();
+    sec.outerHTML = htmlGrafico(inst);
+    const nova = $(`#graf-${inst} .graf-rolagem`);
+    if (nova) nova.scrollLeft = t.dataset.grafPeriodo ? nova.scrollWidth : pos;
+  });
 }
 
 function ligarHistorico() {
   ligarRemover('data-del-compra', 'compras');
-  $('#conteudo').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-periodo]');
-    if (!b) return;
-    periodo = b.dataset.periodo;
-    try { localStorage.setItem(PERIODO_KEY, periodo); } catch { /* sem armazenamento */ }
-    $('#quanto-investi').outerHTML = htmlQuantoInvesti();
-  });
+  ligarGrafico();
 }
 
 function niceStep(x) {
@@ -549,7 +675,7 @@ function renderCarteira() {
       <div class="kpi"><small>Proventos recebidos</small><span class="num">${R(c.proventos)}</span></div>
     </div>
 
-    ${htmlQuantoInvesti()}
+    ${htmlGrafico('hist')}
 
 
     <section class="bloco">
@@ -612,21 +738,20 @@ function renderProventos() {
       </form>
     </section>
 
-    <section class="bloco">
-      <div class="bloco-cab"><h2>Em ${ano}</h2><span class="num"><b>${R(totalAno)}</b></span></div>
-      ${totalAno ? `<div class="por-tipo">${Object.entries(doAno).map(([k, v]) => `<div><small>${esc(TIPOS_PROVENTO[k] || k)}</small><span class="num">${R(v)}</span></div>`).join('')}</div>` : `<p class="dica">Nenhum provento lançado em ${ano} ainda.</p>`}
-    </section>
+    ${htmlGrafico('prov')}
+
+    ${totalAno ? `<p class="dica">Em ${ano}: <b>${R(totalAno)}</b> — ${Object.entries(doAno).map(([k, v]) => `${esc(TIPOS_PROVENTO[k] || k)} ${R(v)}`).join(' · ')}</p>` : ''}
 
     ${S.proventos.length ? `<section class="bloco"><h2>Recebidos</h2>
-      ${[...porMes.entries()].map(([mes, xs]) => `
-        <div class="mes-grupo">
-          <div class="mes-cab"><span>${nomeMesAno(mes)}</span><span class="num">${R(xs.reduce((s, x) => s + Number(x.valor), 0))}</span></div>
+      ${[...porMes.entries()].map(([mes, xs], i) => `
+        <details class="mes-grupo" ${i === 0 ? 'open' : ''}>
+          <summary class="mes-cab"><span>${nomeMesAno(mes).replace(/^./, (c) => c.toUpperCase())}</span><span class="num">${R(xs.reduce((s, x) => s + Number(x.valor), 0))}</span></summary>
           ${xs.map((x) => `<div class="item">
             <span><b>${esc(x.ticker)}</b> · ${esc(TIPOS_PROVENTO[x.tipo] || x.tipo)}<small>${dataBR(x.data)}</small></span>
             <span class="num">${R(x.valor)}</span>
             <button type="button" class="x" data-del-prov="${x.id}" aria-label="Remover provento de ${esc(x.ticker)}">remover</button>
           </div>`).join('')}
-        </div>`).join('')}</section>` : ''}`;
+        </details>`).join('')}</section>` : ''}`;
 }
 
 function ligarProventos() {
@@ -646,6 +771,7 @@ function ligarProventos() {
     persist(); render(); toast('Provento lançado.');
   });
   ligarRemover('data-del-prov', 'proventos');
+  ligarGrafico();
 }
 
 // ---------- aba Ajustes ----------
@@ -726,8 +852,8 @@ async function historicoMensal(ticker) {
   try {
     const r = await fetch(`/api/historico?t=${encodeURIComponent(ticker)}`);
     const j = await r.json();
-    return j.meses || {};
-  } catch { return {}; }
+    return { meses: j.meses || {}, splits: j.splits || [] };
+  } catch { return { meses: {}, splits: [] }; }
 }
 
 async function lerPlanilha(file, avisar) {
@@ -738,13 +864,14 @@ async function lerPlanilha(file, avisar) {
   const hist = {};
   for (const [i, t] of tickers.entries()) {
     avisar(`Buscando preços de ${t} (${i + 1} de ${tickers.length})…`);
-    hist[t] = N.nuvem.servidor ? await historicoMensal(t) : {};
+    hist[t] = N.nuvem.servidor ? await historicoMensal(t) : { meses: {}, splits: [] };
   }
   const compras = [], semPreco = [];
   for (const c of dados.acoes) {
-    const est = estimarCompra(c.valor, hist[c.ticker]?.[c.mes] || PRECO_SEM_HISTORICO[c.ticker]);
+    const h = hist[c.ticker];
+    const est = estimarCompra(c.valor, h.meses[c.mes] || PRECO_SEM_HISTORICO[c.ticker], fatoresDoMes(c.mes, h.splits));
     if (!est) { semPreco.push(c); continue; }
-    compras.push({ id: `pl${c.ticker}${c.mes.replace('-', '')}`.toLowerCase(), data: `${c.mes}-15`, ticker: c.ticker, tipo: c.tipo, qtd: est.qtd, preco: est.preco, custo: est.custo, banco: dados.banco || 'nubank', importado: true });
+    compras.push({ id: `pl${c.ticker}${c.mes.replace('-', '')}`.toLowerCase(), data: `${c.mes}-15`, ticker: c.ticker, tipo: c.tipo, qtd: est.qtd, preco: est.preco, custo: est.custo, banco: dados.banco || 'nubank', importado: true, exato: est.exato, qtdOriginal: est.qtdOriginal });
   }
   const tes = S.ativos.find((a) => a.tipo === 'tesouro');
   const tesTicker = tes?.ticker || 'Tesouro Selic 2031';
@@ -756,7 +883,8 @@ async function lerPlanilha(file, avisar) {
     compras.push({ id: `pltesouro${t.mes.replace('-', '')}`, data: `${t.mes}-15`, ticker: tesTicker, tipo: 'tesouro', qtd, preco, custo: Math.round((t.valor - qtd * preco) * 1e6) / 1e6, banco: dados.banco || 'nubank', importado: true });
   }
   const proventos = (dados.proventos || []).map((p) => ({ id: `plprov${p.mes.replace('-', '')}`, data: `${p.mes}-15`, ticker: 'Vários', tipo: 'outro', valor: p.valor }));
-  return { compras, proventos, semPreco, tesTicker };
+  const desdobradas = compras.filter((c) => c.qtdOriginal && c.qtdOriginal !== c.qtd).length;
+  return { compras, proventos, semPreco, tesTicker, exatas: compras.filter((c) => c.exato).length, acoes: dados.acoes.length, desdobradas };
 }
 
 function abrirResumoPlanilha(res) {
@@ -772,7 +900,7 @@ function abrirResumoPlanilha(res) {
         <thead><tr><th>Ativo</th><th class="r">Compras</th><th class="r">Cotas (estimadas)</th><th class="r">Investido</th></tr></thead>
         <tbody>${[...porTicker.entries()].map(([t, xs]) => `<tr><td><b>${esc(t)}</b></td><td class="r num">${xs.length}</td><td class="r num">${fmtQtd(xs.reduce((s, x) => s + x.qtd, 0))}</td><td class="r num">${R(total(xs))}</td></tr>`).join('')}</tbody>
       </table></div>
-      <p class="dica">As cotas são estimadas pelo preço de cada mês (corrigido por desdobramentos). No Tesouro, a quantidade vem do preço do ${esc(res.tesTicker)} trazido para cada mês pela Selic. As compras ficam marcadas como “da planilha” no Histórico, e você pode corrigir qualquer uma.${res.semPreco.length ? ` <b>${res.semPreco.length} compras ficaram de fora</b> por falta de preço do mês.` : ''}</p>
+      <p class="dica"><b>${res.exatas} de ${res.acoes}</b> compras de ações e FIIs fecharam ao centavo: quantidade × preço do mês + taxa do Nubank dá exatamente o valor da planilha.${res.exatas < res.acoes ? ' As outras (geralmente meses com mais de uma compra) foram aproximadas pelo preço do mês.' : ''}${res.desdobradas ? ` ${res.desdobradas} compras são de antes de um desdobramento e já aparecem com a quantidade de hoje.` : ''} No Tesouro, a quantidade vem do preço do ${esc(res.tesTicker)} trazido para cada mês pela Selic. Tudo pode ser corrigido no Histórico.${res.semPreco.length ? ` <b>${res.semPreco.length} compras ficaram de fora</b> por falta de preço do mês.` : ''}</p>
       <div class="acoes"><span class="esp"></span><button class="btn" value="cancelar" formnovalidate>Cancelar</button><button class="btn prim" value="ok">Salvar no app</button></div>
     </form>`;
   dlg.oninput = null;
@@ -780,6 +908,7 @@ function abrirResumoPlanilha(res) {
     if (dlg.returnValue !== 'ok') return;
     const ids = new Set(res.compras.map((c) => c.id));
     const idsP = new Set(res.proventos.map((p) => p.id));
+    res.compras.forEach((c) => { delete c.exato; delete c.qtdOriginal; });
     S.compras = [...S.compras.filter((c) => !ids.has(c.id)), ...res.compras];
     S.proventos = [...S.proventos.filter((p) => !idsP.has(p.id)), ...res.proventos];
     for (let i = 0; i < res.compras.length; i += 150) N.adicionarCompras(res.compras.slice(i, i + 150));

@@ -178,7 +178,7 @@ async function historicoYahoo(ticker) {
   let ultimoErro;
   for (const host of ['query1', 'query2']) {
     try {
-      const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?interval=1mo&range=10y`;
+      const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?interval=1mo&range=10y&events=split`;
       const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, cf: { cacheTtl: 86400, cacheEverything: true } });
       if (!r.ok) throw new Error(`yahoo ${r.status}`);
       const res = (await r.json())?.chart?.result?.[0];
@@ -190,12 +190,17 @@ async function historicoYahoo(ticker) {
         const mes = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
         if (q.low?.[i] != null && q.high?.[i] != null) meses[mes] = { low: q.low[i], high: q.high[i], close: q.close?.[i] ?? null };
       });
-      return { ticker, meses };
+      // desdobramentos e grupamentos: os preços do Yahoo já vêm corrigidos por eles
+      const splits = Object.values(res?.events?.splits || {})
+        .filter((x) => x.numerator > 0 && x.denominator > 0)
+        .map((x) => ({ data: new Date((x.date + 3 * 3600) * 1000).toISOString().slice(0, 10), fator: x.numerator / x.denominator }))
+        .sort((a, b) => a.data.localeCompare(b.data));
+      return { ticker, meses, splits };
     } catch (e) {
       ultimoErro = e;
     }
   }
-  return { ticker, meses: {}, erro: ultimoErro?.message || 'sem histórico' };
+  return { ticker, meses: {}, splits: [], erro: ultimoErro?.message || 'sem histórico' };
 }
 
 async function cotacoes(tickers, brapiToken) {

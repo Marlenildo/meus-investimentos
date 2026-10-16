@@ -156,3 +156,40 @@ export function aportesPorMes(compras) {
   }
   return [...m.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([mes, valor]) => ({ mes, valor }));
 }
+
+// ---------- quanto investi por dia / mês / ano ----------
+export const CHAVE_PERIODO = {
+  dia: (d) => String(d).slice(0, 10),
+  mes: (d) => String(d).slice(0, 7),
+  ano: (d) => String(d).slice(0, 4),
+};
+
+/** Linhas em ordem cronológica: valor investido por tipo, total, proventos e acumulado. */
+export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
+  const chave = CHAVE_PERIODO[periodo] || CHAVE_PERIODO.mes;
+  const m = new Map();
+  const linha = (k) => {
+    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0 });
+    return m.get(k);
+  };
+  for (const c of compras) {
+    const v = Number(c.qtd) * Number(c.preco) + Number(c.custo || 0);
+    const l = linha(chave(c.data));
+    const grupo = c.tipo === 'acao' || c.tipo === 'fii' || c.tipo === 'tesouro' ? c.tipo : 'outros';
+    l[grupo] += v;
+    l.total += v;
+    l.compras++;
+  }
+  for (const p of proventos) linha(chave(p.data)).proventos += Number(p.valor || 0);
+  let acum = 0;
+  return [...m.values()]
+    .sort((a, b) => a.chave.localeCompare(b.chave))
+    .map((l) => {
+      acum += l.total;
+      return {
+        ...l,
+        acao: round2(l.acao), fii: round2(l.fii), tesouro: round2(l.tesouro), outros: round2(l.outros),
+        total: round2(l.total), proventos: round2(l.proventos), acumulado: round2(acum),
+      };
+    });
+}

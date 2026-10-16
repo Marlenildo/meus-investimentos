@@ -1,6 +1,6 @@
 import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
-  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, aportesPorMes,
+  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo,
 } from './calc.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
@@ -204,6 +204,8 @@ function pintarPrecos() {
   pintarTotais();
 }
 
+const investidoNoMes = (ym) => round2(S.compras.filter((c) => mesDe(c.data) === ym).reduce((s, c) => s + c.qtd * c.preco + (c.custo || 0), 0));
+
 function htmlResumoCarteira(cart) {
   if (!S.compras.length) return '<div id="resumo-cart" hidden></div>';
   const cls = cart.resultado >= 0 ? 'var-alta' : 'var-baixa';
@@ -212,7 +214,7 @@ function htmlResumoCarteira(cart) {
       <div><small>Carteira hoje</small><span class="num">${R(cart.valorAtual)}</span></div>
       <div><small>Investido</small><span class="num">${R(cart.investido)}</span></div>
       <div><small>Resultado</small><span class="num ${cls}">${R(cart.resultado)} <small class="${cls}">${pct(cart.investido ? cart.resultado / cart.investido : null)}</small></span></div>
-      <div><small>Proventos</small><span class="num">${R(cart.proventos)}</span></div>
+      <div><small>Investido em ${nomeMes(mesDe(hojeISO()))}</small><span class="num">${R(investidoNoMes(mesDe(hojeISO())))}</span></div>
     </div>`;
 }
 
@@ -239,12 +241,13 @@ function renderComprar() {
       <div class="campos">
         <label class="campo"><span>Aporte de ${nomeMes(S.plano.mes)}</span>
           <input id="in-aporte" class="num" inputmode="decimal" value="${aporteMes().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}">
+          <span class="sub">Padrão ${R(S.ajustes.aporteMensal)} · <a href="#ajustes">mudar</a></span>
         </label>
         <label class="campo"><span>+ Proventos para reinvestir</span>
           <input id="in-proventos" class="num" inputmode="decimal" value="${proventosMes().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}">
           <span class="sub">${manual ? `Valor digitado · <button type="button" id="prov-auto">usar ${R(auto)} de ${nomeMes(mesAnt)}</button>` : `Recebidos em ${nomeMes(mesAnt)} · <a href="#proventos">lançar</a>`}</span>
         </label>
-        <div class="disp"><span>= Disponível para investir</span><span class="num" id="disp">${R(disponivel())}</span></div>
+        <div class="campo"><span>= Disponível para investir</span><div class="disp-valor num" id="disp">${R(disponivel())}</div><span class="sub">aporte + proventos</span></div>
       </div>
     </section>
 
@@ -458,15 +461,17 @@ function abrirRegistrar() {
 }
 
 // ---------- aba Carteira ----------
-function graficoAportes(serie) {
-  const ult = serie.slice(-12);
-  if (!ult.length) return '';
-  let acum = 0;
-  const antes = serie.slice(0, -12).reduce((s, x) => s + x.valor, 0);
-  acum = antes;
-  const pts = ult.map((x) => ({ ...x, acum: (acum += x.valor) }));
-  const W = 640, H = 220, pl = 64, pr = 12, pt = 14, pb = 28;
-  const maxV = Math.max(...pts.map((p) => p.acum), 1);
+// ---------- quanto investi: por dia, mês ou ano ----------
+const PERIODO_KEY = 'meus-investimentos:periodo';
+let periodo = (() => { try { return localStorage.getItem(PERIODO_KEY) || 'mes'; } catch { return 'mes'; } })();
+const rotuloCurto = (chave, per) => per === 'ano' ? chave : per === 'mes' ? mesCurto(chave) : `${chave.slice(8, 10)}/${chave.slice(5, 7)}`;
+const rotuloLongo = (chave, per) => per === 'ano' ? chave : per === 'mes' ? nomeMesAno(chave).replace(/^./, (c) => c.toUpperCase()) : dataBR(chave);
+
+function graficoPeriodo(linhas, per) {
+  const pts = linhas.slice(-12);
+  if (!pts.length) return '';
+  const W = 640, H = 230, pl = 64, pr = 12, pt = 14, pb = 30;
+  const maxV = Math.max(...pts.map((p) => p.acumulado), 1);
   const passoY = niceStep(maxV / 4);
   const topo = Math.ceil(maxV / passoY) * passoY;
   const y = (v) => pt + (H - pt - pb) * (1 - v / topo);
@@ -474,16 +479,58 @@ function graficoAportes(serie) {
   const ticks = [];
   for (let v = 0; v <= topo + 1e-6; v += passoY) ticks.push(v);
   const curto = (v) => v >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : v.toLocaleString('pt-BR');
+  const cx = (i) => pl + i * bw + bw / 2;
   return `
-    <svg class="grafico" viewBox="0 0 ${W} ${H}" role="img" aria-label="Aportes por mês e total acumulado">
+    <svg class="grafico" viewBox="0 0 ${W} ${H}" role="img" aria-label="Quanto investi em cada período e o total acumulado">
+      <defs><linearGradient id="grad-barra" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
       ${ticks.map((v) => `<line class="grade" x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}"/><text x="${pl - 8}" y="${y(v) + 4}" text-anchor="end">${curto(v)}</text>`).join('')}
-      ${pts.map((p, i) => `<rect class="barra-g" x="${pl + i * bw + bw * 0.2}" y="${y(p.valor)}" width="${bw * 0.6}" height="${Math.max(0, y(0) - y(p.valor))}" rx="2"><title>${mesCurto(p.mes)}: ${R(p.valor)}</title></rect>
-        <text x="${pl + i * bw + bw / 2}" y="${H - 8}" text-anchor="middle">${mesCurto(p.mes)}</text>`).join('')}
-      <polyline class="acum" points="${pts.map((p, i) => `${pl + i * bw + bw / 2},${y(p.acum)}`).join(' ')}"/>
-      ${pts.map((p, i) => `<circle class="acum-pt" cx="${pl + i * bw + bw / 2}" cy="${y(p.acum)}" r="${i === pts.length - 1 ? 4 : 2.5}"><title>Acumulado: ${R(p.acum)}</title></circle>`).join('')}
+      ${pts.map((p, i) => `<rect class="barra-g" x="${pl + i * bw + bw * 0.2}" y="${y(p.total)}" width="${bw * 0.6}" height="${Math.max(0, y(0) - y(p.total))}" rx="4"><title>${rotuloLongo(p.chave, per)}: ${R(p.total)}</title></rect>
+        <text x="${cx(i)}" y="${H - 9}" text-anchor="middle">${rotuloCurto(p.chave, per)}</text>`).join('')}
+      <polyline class="acum" points="${pts.map((p, i) => `${cx(i)},${y(p.acumulado)}`).join(' ')}"/>
+      ${pts.map((p, i) => `<circle class="acum-pt" cx="${cx(i)}" cy="${y(p.acumulado)}" r="${i === pts.length - 1 ? 4 : 2.5}"><title>Acumulado: ${R(p.acumulado)}</title></circle>`).join('')}
     </svg>
-    <div class="legenda"><span><i></i>Aporte no mês</span><span><i class="l"></i>Total investido acumulado</span></div>`;
+    <div class="legenda"><span><i></i>Investido no período</span><span><i class="l"></i>Total acumulado</span></div>`;
 }
+
+function htmlQuantoInvesti() {
+  const linhas = resumoPorPeriodo(S.compras, S.proventos, periodo);
+  const tem = (k) => linhas.some((l) => l[k] > 0);
+  const cols = [['acao', 'Ações'], ['fii', 'FIIs'], ['tesouro', 'Tesouro'], ['outros', 'ETF/BDR']].filter(([k]) => tem(k));
+  const soma = (k) => round2(linhas.reduce((s, l) => s + l[k], 0));
+  const nomePer = { dia: 'dia', mes: 'mês', ano: 'ano' }[periodo];
+  return `
+    <section class="bloco" id="quanto-investi">
+      <div class="bloco-cab">
+        <h2>Quanto investi por ${nomePer}</h2>
+        <div class="seg" role="group" aria-label="Agrupar por">
+          ${[['dia', 'Dia'], ['mes', 'Mês'], ['ano', 'Ano']].map(([k, n]) => `<button type="button" data-periodo="${k}" aria-pressed="${periodo === k}">${n}</button>`).join('')}
+        </div>
+      </div>
+      ${graficoPeriodo(linhas, periodo)}
+      <div class="tabela-wrap"><table>
+        <thead><tr><th>${nomePer[0].toUpperCase() + nomePer.slice(1)}</th>${cols.map(([, n]) => `<th class="r">${n}</th>`).join('')}<th class="r">Total investido</th><th class="r">Proventos</th><th class="r">Acumulado</th></tr></thead>
+        <tbody>${[...linhas].reverse().map((l) => `<tr>
+          <td>${rotuloLongo(l.chave, periodo)}</td>
+          ${cols.map(([k]) => `<td class="r num">${l[k] ? R(l[k]) : '<span class="apagado">—</span>'}</td>`).join('')}
+          <td class="r num"><b>${R(l.total)}</b></td>
+          <td class="r num">${l.proventos ? R(l.proventos) : '<span class="apagado">—</span>'}</td>
+          <td class="r num">${R(l.acumulado)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td>Total</td>${cols.map(([k]) => `<td class="r num">${R(soma(k))}</td>`).join('')}<td class="r num">${R(soma('total'))}</td><td class="r num">${R(soma('proventos'))}</td><td></td></tr></tfoot>
+      </table></div>
+    </section>`;
+}
+
+function ligarHistorico() {
+  ligarRemover('data-del-compra', 'compras');
+  $('#conteudo').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-periodo]');
+    if (!b) return;
+    periodo = b.dataset.periodo;
+    try { localStorage.setItem(PERIODO_KEY, periodo); } catch { /* sem armazenamento */ }
+    $('#quanto-investi').outerHTML = htmlQuantoInvesti();
+  });
+}
+
 function niceStep(x) {
   const p = Math.pow(10, Math.floor(Math.log10(Math.max(x, 1))));
   const m = x / p;
@@ -492,11 +539,10 @@ function niceStep(x) {
 
 function renderCarteira() {
   if (!S.compras.length) {
-    return `<section class="bloco"><div class="vazio"><h2>Sua carteira aparece aqui</h2><p>Depois de comprar no banco, toque em <b>Registrar compras</b> na aba Comprar. Aqui você vê cotas, preço médio, quanto investiu e o retorno.</p><a class="btn prim" href="#comprar">Ir para Comprar</a></div></section>`;
+    return `<section class="bloco"><div class="vazio"><h2>Sua carteira aparece aqui</h2><p>Depois de comprar no banco, toque em <b>Comprei — registrar</b> na tela inicial. Aqui você vê cotas, preço médio, quanto investiu e o retorno.</p><a class="btn prim" href="#comprar">Ir para Comprar</a></div></section>`;
   }
   const c = carteira(S.compras, S.ativos, S.proventos);
   const cls = (v) => (v == null ? '' : v >= 0 ? 'var-alta' : 'var-baixa');
-  const serie = aportesPorMes(S.compras);
   const porMes = groupBy([...S.compras].sort((a, b) => b.data.localeCompare(a.data)), (x) => mesDe(x.data));
   return `
     <div class="kpis">
@@ -505,6 +551,8 @@ function renderCarteira() {
       <div class="kpi"><small>Resultado</small><span class="num ${cls(c.resultado)}">${R(c.resultado)}</span><small class="${cls(c.resultado)}">${pct(c.investido ? c.resultado / c.investido : null)}</small></div>
       <div class="kpi"><small>Proventos recebidos</small><span class="num">${R(c.proventos)}</span></div>
     </div>
+
+    ${htmlQuantoInvesti()}
 
     <section class="bloco">
       <div class="bloco-cab"><h2>Posição por ativo</h2><small>Valor hoje usa a última cotação da aba Comprar</small></div>
@@ -521,10 +569,7 @@ function renderCarteira() {
       </table></div>
     </section>
 
-    <section class="bloco">
-      <h2>Aportes ao longo do tempo</h2>
-      ${graficoAportes(serie)}
-    </section>
+
 
     <section class="bloco">
       <h2>Histórico de compras</h2>
@@ -582,7 +627,7 @@ function renderProventos() {
         <label class="campo"><span>Ativo</span><select id="pv-ticker" required>${tickers.map((t) => `<option>${esc(t)}</option>`).join('')}</select></label>
         <label class="campo"><span>Tipo</span><select id="pv-tipo">${Object.entries(TIPOS_PROVENTO).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
         <label class="campo"><span>Valor recebido (R$)</span><input id="pv-valor" class="num" inputmode="decimal" placeholder="0,00" required></label>
-        <button class="btn prim" type="submit">Lançar</button>
+        <div class="campo-acao"><button class="btn prim" type="submit">Lançar</button></div>
       </form>
     </section>
 
@@ -632,7 +677,7 @@ function renderAjustes() {
       <h2>Aporte e cotações</h2>
       <div class="campos">
         <label class="campo"><span>Aporte mensal padrão (R$)</span><input id="aj-aporte" class="num" inputmode="decimal" value="${Number(S.ajustes.aporteMensal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"></label>
-        <label class="campo" style="grid-column: span 2"><span>Token da brapi.dev</span><input id="aj-token" type="password" autocomplete="off" value="${esc(S.ajustes.token)}" placeholder="cole aqui o token gratuito"></label>
+        <label class="campo"><span>Token da brapi.dev (opcional)</span><input id="aj-token" type="password" autocomplete="off" value="${esc(S.ajustes.token)}" placeholder="cole aqui o token gratuito"></label>
       </div>
       <p class="dica">${N.nuvem.servidor
         ? 'Neste endereço, as cotações vêm do Yahoo Finance (atraso de ~15 min, como em todo serviço gratuito da B3) e o token da brapi é só reserva, opcional.'
@@ -715,7 +760,7 @@ function ligarAjustes() {
 // ---------- roteamento ----------
 const ABAS = {
   comprar: [renderComprar, ligarComprar],
-  carteira: [renderCarteira, () => ligarRemover('data-del-compra', 'compras')],
+  carteira: [renderCarteira, ligarHistorico],
   proventos: [renderProventos, ligarProventos],
   ajustes: [renderAjustes, ligarAjustes],
 };
@@ -749,7 +794,7 @@ function htmlConta() {
       <p class="dica">Entrando, suas compras, proventos e ativos ficam salvos na Cloudflare e aparecem em qualquer aparelho. Sem entrar, o app funciona como calculadora: monte a compra normalmente, mas tudo fica só neste aparelho.</p>
       <form class="campos" data-conta-form>
         <label class="campo"><span>Senha</span><input type="password" id="nv-senha" autocomplete="current-password" required></label>
-        <button class="btn prim" type="submit">Entrar</button>
+        <div class="campo-acao"><button class="btn prim" type="submit">Entrar</button></div>
       </form>
       ${N.nuvem.mensagem ? `<p class="aviso"><b>${esc(N.nuvem.mensagem)}</b></p>` : ''}
       <div class="acoes"><button type="button" class="btn" data-conta="fechar">Continuar sem entrar</button></div>`;

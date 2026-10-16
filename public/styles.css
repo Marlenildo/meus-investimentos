@@ -241,8 +241,11 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.6; cursor: po
 .logo-ativo.fii { background: var(--chip-fii); color: var(--chip-fii-t); }
 .logo-ativo.tesouro { background: var(--chip-tes); color: var(--chip-tes-t); }
 .logo-ativo.etf, .logo-ativo.bdr { background: var(--chip-outro); color: var(--chip-outro-t); }
-.logo-ativo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #fff; padding: 4px; opacity: 0; transition: opacity 0.2s ease; }
+.logo-ativo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; opacity: 0; transition: opacity 0.2s ease; }
 .logo-ativo img.ok { opacity: 1; }
+/* com o logo carregado, ele mesmo é o ícone arredondado: sem fundo nem borda por trás */
+.logo-ativo:has(img.ok) { background: transparent; box-shadow: none; }
+.logo-ativo:has(img.ok) > span { visibility: hidden; }
 .o-nome { display: flex; align-items: center; gap: 8px; min-width: 0; cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
 .tk { font: 700 1rem var(--f-display); letter-spacing: -0.01em; }
 .pos { font-size: 0.82rem; color: var(--tinta-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

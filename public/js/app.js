@@ -45,12 +45,13 @@ const num = (v) => {
 
 function frescor(ativo) {
   const st = statusCotacao[ativo.id];
-  if (!ativo.preco) return { txt: ativo.tipo === 'tesouro' ? 'preço do site do Tesouro' : 'toque para digitar', cls: '' };
+  if (!ativo.preco) return { txt: ativo.tipo === 'tesouro' ? 'site do Tesouro' : '', cls: '' };
   if (st?.erro) return { txt: 'sem atualização', cls: 'velho' };
   if (!ativo.precoEm) return { txt: '', cls: '' };
   const d = new Date(ativo.precoEm);
   const min = Math.round((Date.now() - d) / 60000);
-  const manual = ativo.fonte === 'manual' ? ' · manual' : '';
+  if (ativo.fonte === 'manual') return { txt: 'digitado', cls: '' };
+  const manual = '';
   let txt;
   if (min < 1) txt = 'agora';
   else if (min < 60) txt = `há ${min} min`;
@@ -140,29 +141,43 @@ function htmlSubCarteira(cart) {
   return `<small class="sub-cab" id="sub-cart">Sua carteira: <b>${R(cart.valorAtual)}</b> <span class="${cls}">${pct(cart.investido ? cart.resultado / cart.investido : null)}</span></small>`;
 }
 
+const ICONE_ALCA = '<svg viewBox="0 0 10 16" width="10" height="16" aria-hidden="true"><g fill="currentColor"><circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="8" r="1.5"/><circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13" r="1.5"/><circle cx="7.5" cy="13" r="1.5"/></g></svg>';
+let editandoLista = false;
+
+/** Logo do ativo (ícones públicos da brapi); se não houver, mostra as iniciais na cor do tipo. */
+function htmlLogo(a) {
+  const ini = a.tipo === 'tesouro' ? 'TD' : a.ticker.replace(/[^A-Z]/gi, '').slice(0, 2).toUpperCase();
+  const img = a.tipo === 'tesouro' ? '' : `<img src="https://icons.brapi.dev/icons/${encodeURIComponent(a.ticker.toUpperCase())}.svg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onload="this.classList.add('ok')" onerror="this.remove()">`;
+  return `<span class="logo-ativo ${a.tipo}" aria-hidden="true"><span>${esc(ini)}</span>${img}</span>`;
+}
+
 function htmlOrdem(a, pos) {
   const q = Number(S.plano.qtds[a.id]) || 0;
   const f = frescor(a);
   const passo = passoDe(a);
   return `
     <div class="ordem ${q > 0 ? 'tem-qtd' : ''}" data-id="${a.id}">
-      <div class="ordem-ativo">
-        <div class="linha1"><button type="button" class="arrasto" data-arrasto="${a.id}" title="Arraste para mudar a ordem" aria-label="Mover ${esc(a.ticker)} (setas para cima e para baixo)"><svg viewBox="0 0 10 16" width="10" height="16"><g fill="currentColor"><circle cx="2.5" cy="3" r="1.5"/><circle cx="7.5" cy="3" r="1.5"/><circle cx="2.5" cy="8" r="1.5"/><circle cx="7.5" cy="8" r="1.5"/><circle cx="2.5" cy="13" r="1.5"/><circle cx="7.5" cy="13" r="1.5"/></g></svg></button><span class="tk" title="${esc(a.nome || a.ticker)}">${esc(a.ticker)}</span><span class="chip ${a.tipo}">${esc(TIPOS[a.tipo]?.nome || a.tipo)}</span></div>
-        ${htmlPosicao(pos)}
+      <button type="button" class="arrasto" data-arrasto="${a.id}" title="Arraste para mudar a ordem" aria-label="Mover ${esc(a.ticker)} (setas para cima e para baixo)">${ICONE_ALCA}</button>
+      <div class="o-ativo">
+        ${htmlLogo(a)}
+        <div class="o-texto">
+          <div class="o-nome"><span class="tk" title="${esc(a.nome || a.ticker)}">${esc(a.ticker)}</span><span class="chip ${a.tipo}">${esc(TIPOS[a.tipo]?.nome || a.tipo)}</span></div>
+          ${htmlPosicao(pos)}
+        </div>
       </div>
-      <div class="ordem-preco">
+      <div class="o-preco">
         <input class="preco-input num" data-preco="${a.id}" inputmode="decimal" aria-label="Preço de ${esc(a.ticker)}" value="${fmtPreco(a.preco)}" placeholder="preço">
         <span class="frescor ${f.cls}" data-frescor="${a.id}">${esc(f.txt)}</span>
       </div>
-      <div class="ordem-qtd">
+      <div class="o-qtd">
         <div class="qtd">
           <button type="button" data-menos="${a.id}" aria-label="Menos ${esc(a.ticker)}">−</button>
           <input type="number" id="q-${a.id}" data-qtd="${a.id}" min="0" step="${passo}" inputmode="${passo === 1 ? 'numeric' : 'decimal'}" value="${q || ''}" placeholder="0" aria-label="Quantidade de ${esc(a.ticker)} para comprar">
           <button type="button" data-mais="${a.id}" aria-label="Mais ${esc(a.ticker)}">+</button>
-          <button type="button" class="max" data-max="${a.id}" title="Usar o que falta">MÁX</button>
         </div>
+        <button type="button" class="max" data-max="${a.id}" title="Usar o que falta">MÁX</button>
       </div>
-      <div class="ordem-total" data-total="${a.id}"></div>
+      <div class="o-total" data-total="${a.id}"></div>
       <button type="button" class="x x-del" data-del-ativo="${a.id}" title="Tirar ${esc(a.ticker)} da lista" aria-label="Tirar ${esc(a.ticker)} da lista">✕</button>
     </div>`;
 }
@@ -226,7 +241,7 @@ function renderComprar() {
   const ordem = S.ativos;
   return `
     <section class="bloco">
-      <div class="campos">
+      <div class="campos plano">
         <label class="campo"><span>Aporte de ${nomeMes(S.plano.mes)}</span>
           <input id="in-aporte" class="num" inputmode="decimal" value="${aporteMes().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}">
           <span class="sub">padrão ${R(S.ajustes.aporteMensal)}</span>
@@ -246,13 +261,17 @@ function renderComprar() {
           <select id="ordenar" class="peq" aria-label="Ordenar a lista">
             <option value="">Ordenar…</option><option value="tipo">Por tipo</option><option value="az">A → Z</option><option value="posicao">Maior posição</option>
           </select>
-          <button type="button" class="btn peq" id="btn-dividir" title="Divide o valor igualmente entre os ativos">Dividir igual</button>
+          <button type="button" class="btn peq" id="btn-dividir" title="Divide o valor igualmente entre os ativos">Dividir</button>
           <button type="button" class="btn peq" id="btn-limpar">Zerar</button>
+          <button type="button" class="btn peq ${editandoLista ? 'ativo' : ''}" id="btn-editar" aria-pressed="${editandoLista}">${editandoLista ? 'Pronto' : 'Editar'}</button>
           <button type="button" class="icone-btn ${atualizando ? 'girando' : ''}" id="btn-cotacoes" title="Atualizar preços" aria-label="Atualizar preços">${ICONE_ATUALIZAR}</button>
         </div>
       </div>
       ${N.nuvem.estado === 'local' && !S.ajustes.token ? `<p class="aviso"><b>Preços manuais:</b> ${esc(N.nuvem.mensagem || '')} Toque no preço para digitar.</p>` : ''}
-      ${ordem.length ? `<div class="ordens">${ordem.map((a) => htmlOrdem(a, cart.porTicker.get(a.ticker))).join('')}</div>` : '<p class="dica">Sua lista está vazia. Adicione o primeiro ativo.</p>'}
+      ${ordem.length ? `<div class="lista-ativos ${editandoLista ? 'editando' : ''}">
+        <div class="ordem-cab" aria-hidden="true"><span></span><span>Ativo</span><span>Preço</span><span>Comprar</span><span>Total</span><span></span></div>
+        <div class="ordens">${ordem.map((a) => htmlOrdem(a, cart.porTicker.get(a.ticker))).join('')}</div>
+      </div>` : '<p class="dica">Sua lista está vazia. Adicione o primeiro ativo.</p>'}
       <button type="button" class="add-abrir" id="add-abrir" ${ordem.length ? '' : 'hidden'}>+ Adicionar ativo</button>
       <form id="form-add" class="add-ativo" autocomplete="off" ${ordem.length ? 'hidden' : ''}>
         <input id="add-ticker" placeholder="Código: ITSA4, HGLG11, Tesouro IPCA+ 2035…" aria-label="Código do ativo" required>
@@ -286,6 +305,7 @@ function ligarComprar() {
   $('#prov-auto')?.addEventListener('click', () => { S.plano.proventosManual = null; persist('plano'); render(); });
   $('#btn-cotacoes').addEventListener('click', atualizarCotacoes);
   $('#btn-limpar').addEventListener('click', () => { S.plano.qtds = {}; persist('plano'); render(); });
+  $('#btn-editar').addEventListener('click', () => { editandoLista = !editandoLista; render(); });
   $('#btn-registrar').addEventListener('click', abrirRegistrar);
 
   // dividir igual: o valor para investir dividido pelo número de ativos, como na planilha
@@ -394,35 +414,47 @@ function ligarComprar() {
     persist('ativos'); render();
   });
 
-  // arrastar e soltar pela alça (mouse e toque); setas do teclado na alça também movem
+  // arrastar e soltar pela alça ou pelo nome do ativo (mouse e toque), com SortableJS;
+  // setas do teclado na alça também movem
   const lista = $('.ordens');
   const salvarOrdem = () => {
     const ids = [...lista.children].map((el) => el.dataset.id);
     S.ativos.sort((x, y) => ids.indexOf(x.id) - ids.indexOf(y.id));
     persist('ativos');
   };
-  lista?.addEventListener('pointerdown', (e) => {
-    const alca = e.target.closest('.arrasto');
-    if (!alca) return;
-    e.preventDefault();
-    const linha = alca.closest('.ordem');
-    linha.classList.add('arrastando');
-    alca.setPointerCapture(e.pointerId);
-    const mover = (ev) => {
-      const alvo = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.ordem');
-      if (!alvo || alvo === linha || alvo.parentElement !== lista) return;
-      const r = alvo.getBoundingClientRect();
-      lista.insertBefore(linha, ev.clientY > r.top + r.height / 2 ? alvo.nextSibling : alvo);
-    };
-    const soltar = () => {
-      alca.removeEventListener('pointermove', mover);
-      linha.classList.remove('arrastando');
-      salvarOrdem();
-    };
-    alca.addEventListener('pointermove', mover);
-    alca.addEventListener('pointerup', soltar, { once: true });
-    alca.addEventListener('pointercancel', soltar, { once: true });
-  });
+  if (lista && window.Sortable) {
+    window.Sortable.create(lista, {
+      handle: '.arrasto, .o-nome, .logo-ativo',
+      animation: 160,
+      delay: 120,
+      delayOnTouchOnly: true,
+      forceFallback: true,
+      fallbackOnBody: true,
+      ghostClass: 'arrasto-lugar',
+      chosenClass: 'arrasto-escolhido',
+      dragClass: 'arrasto-voando',
+      onEnd: (ev) => { if (ev.oldIndex !== ev.newIndex) salvarOrdem(); },
+    });
+  } else if (lista) {
+    lista.addEventListener('pointerdown', (e) => {
+      const alca = e.target.closest('.arrasto');
+      if (!alca) return;
+      e.preventDefault();
+      const linha = alca.closest('.ordem');
+      linha.classList.add('arrasto-escolhido');
+      alca.setPointerCapture(e.pointerId);
+      const mover = (ev) => {
+        const alvo = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.ordem');
+        if (!alvo || alvo === linha || alvo.parentElement !== lista) return;
+        const r = alvo.getBoundingClientRect();
+        lista.insertBefore(linha, ev.clientY > r.top + r.height / 2 ? alvo.nextSibling : alvo);
+      };
+      const soltar = () => { alca.removeEventListener('pointermove', mover); linha.classList.remove('arrasto-escolhido'); salvarOrdem(); };
+      alca.addEventListener('pointermove', mover);
+      alca.addEventListener('pointerup', soltar, { once: true });
+      alca.addEventListener('pointercancel', soltar, { once: true });
+    });
+  }
   lista?.addEventListener('keydown', (e) => {
     const alca = e.target.closest('.arrasto');
     if (!alca || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;

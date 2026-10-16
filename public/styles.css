@@ -455,3 +455,12 @@ select.peq { height: 34px; border-radius: 999px; font-size: 0.82rem; font-weight
   .bloco-cab select.peq { padding-right: 30px; }
   .bloco-cab .icone-btn { width: 32px; height: 32px; }
 }
+
+/* valor de mercado (linha por cima das barras, no acumulado) */
+.grafico .linha-merc { fill: none; stroke: var(--tinta); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; pointer-events: none; }
+.grafico .ponto-merc { fill: var(--folha); stroke: var(--tinta); stroke-width: 2; pointer-events: none; }
+.grafico text.v2.ganho { fill: var(--alta); font-weight: 600; }
+.grafico text.v2.perda { fill: var(--baixa); font-weight: 600; }
+.sw.s-mercado { width: 14px; height: 10px; border-radius: 0; background: linear-gradient(var(--tinta), var(--tinta)) center / 100% 2px no-repeat; position: relative; }
+.sw.s-mercado::after { content: ""; position: absolute; left: 4px; top: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--folha); box-shadow: inset 0 0 0 2px var(--tinta); }
+.filtro[aria-pressed="false"] .sw.s-mercado { background: linear-gradient(var(--tinta-3), var(--tinta-3)) center / 100% 2px no-repeat; box-shadow: none; }

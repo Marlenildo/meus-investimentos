@@ -560,9 +560,10 @@ const SERIES = [
 ];
 const PILHA = ['acao', 'fii', 'outros', 'tesouro']; // de baixo para cima
 const GRAF_KEY = 'meus-investimentos:grafico';
-const PADRAO_GRAF = { periodo: 'mes', modo: 'periodo', hist: ['prov', 'acao', 'fii', 'outros', 'tesouro'], sel: null };
+const PADRAO_GRAF = { periodo: 'mes', modo: 'periodo', hist: ['prov', 'acao', 'fii', 'outros', 'tesouro', 'mercado'], sel: null };
 let G = (() => { try { return { ...PADRAO_GRAF, ...JSON.parse(localStorage.getItem(GRAF_KEY) || '{}') }; } catch { return { ...PADRAO_GRAF }; } })();
 if (typeof G.sel !== 'number') G.sel = null;
+if (!G.hist.includes('mercado') && !G.semMercado) G.hist.push('mercado');
 const salvarG = () => { try { localStorage.setItem(GRAF_KEY, JSON.stringify(G)); } catch { /* sem armazenamento */ } };
 
 const rotuloCurto = (chave, per) => per === 'ano' ? chave : per === 'mes' ? mesCurto(chave) : `${chave.slice(8, 10)}/${chave.slice(5, 7)}`;
@@ -587,6 +588,66 @@ function linhasDoGrafico(per) {
   return out;
 }
 
+// ---------- valor de mercado da carteira em cada mês (para comparar com o investido) ----------
+const HIST_KEY = 'meus-investimentos:historico-precos';
+let HIST = (() => {
+  try { const h = JSON.parse(localStorage.getItem(HIST_KEY) || 'null'); return h && h.data === hojeISO() ? h.tickers : null; } catch { return null; }
+})();
+let carregandoHist = false;
+
+/** Busca uma vez por dia o fechamento mensal de cada ativo da carteira. */
+async function garantirHistorico() {
+  if (HIST || carregandoHist) return;
+  if (!N.nuvem.servidor) { HIST = {}; return; }
+  carregandoHist = true;
+  const tickers = [...new Set(S.compras.filter((c) => c.tipo !== 'tesouro').map((c) => c.ticker))];
+  const out = {};
+  await Promise.all(tickers.map(async (t) => {
+    const h = await historicoMensal(t);
+    out[t] = Object.fromEntries(Object.entries(h.meses).filter(([, v]) => v.close > 0).map(([m, v]) => [m, v.close]));
+  }));
+  HIST = out;
+  carregandoHist = false;
+  try { localStorage.setItem(HIST_KEY, JSON.stringify({ data: hojeISO(), tickers: out })); } catch { /* sem armazenamento */ }
+  redesenharGrafico();
+}
+
+/** Preço de um ativo no fim do mês `ym` (preço de hoje no mês atual). */
+function precoNoMes(ticker, tipo, ym) {
+  const atual = mesDe(hojeISO());
+  const ativo = S.ativos.find((a) => a.ticker === ticker);
+  if (ym >= atual && ativo?.preco) return ativo.preco;
+  if (tipo === 'tesouro') return ativo?.preco ? precoTesouroEm(ym, ativo.preco, atual) : null;
+  const closes = HIST?.[ticker];
+  if (!closes) return null;
+  let melhor = null;
+  for (const m in closes) if (m <= ym && (!melhor || m > melhor)) melhor = m;
+  return melhor ? closes[melhor] : null;
+}
+
+/** Quanto a carteira valia no fim do mês `ym`, por tipo. Sem preço, vale o que custou. */
+function mercadoAte(ym) {
+  const pos = new Map();
+  for (const c of S.compras) {
+    if (mesDe(c.data) > ym) continue;
+    const p = pos.get(c.ticker) || { tipo: c.tipo, qtd: 0, custo: 0 };
+    p.qtd += Number(c.qtd); p.custo += Number(c.qtd) * Number(c.preco) + Number(c.custo || 0);
+    pos.set(c.ticker, p);
+  }
+  const porTipo = { acao: 0, fii: 0, outros: 0, tesouro: 0 };
+  for (const [t, p] of pos) {
+    const grupo = ['acao', 'fii', 'tesouro'].includes(p.tipo) ? p.tipo : 'outros';
+    const preco = precoNoMes(t, p.tipo, ym);
+    porTipo[grupo] += preco ? p.qtd * preco : p.custo;
+  }
+  return porTipo;
+}
+const fimDoPeriodo = (chave, per) => {
+  const atual = mesDe(hojeISO());
+  if (per === 'ano') return chave === atual.slice(0, 4) ? atual : `${chave}-12`;
+  return chave;
+};
+
 /** Barra com só os cantos de cima arredondados. */
 function barra(x, yTopo, w, h, r, cls) {
   if (h <= 0) return '';
@@ -603,10 +664,19 @@ function htmlGrafico(largura) {
     linhas = linhas.map((l) => { for (const k of Object.keys(soma)) soma[k] += l[k]; return { ...l, ...soma }; });
   }
   const presentes = SERIES.filter((x) => linhas.some((l) => (x.k === 'prov' ? l.proventos : l[x.k]) > 0));
+  const podeMerc = acum && per !== 'dia' && S.compras.length > 0;
+  if (podeMerc) presentes.push({ k: 'mercado', nome: 'Valor de mercado' });
   const ativos = new Set((G.hist || []).filter((k) => presentes.some((x) => x.k === k)));
   const pilha = PILHA.filter((k) => ativos.has(k));
   const comProv = ativos.has('prov');
   const inv = (l) => pilha.reduce((s, k) => s + l[k], 0);
+  const comMerc = podeMerc && ativos.has('mercado');
+  if (comMerc && !HIST) garantirHistorico();
+  const merc = linhas.map((l) => {
+    if (!comMerc || !HIST) return null;
+    const m = mercadoAte(fimDoPeriodo(l.chave, per));
+    return pilha.reduce((s, k) => s + m[k], 0);
+  });
   const brutas = linhasDoGrafico(per);
   const totInv = brutas.reduce((s, l) => s + pilha.reduce((t, k) => t + l[k], 0), 0);
   const totProv = comProv ? brutas.reduce((s, l) => s + l.proventos, 0) : 0;
@@ -614,12 +684,12 @@ function htmlGrafico(largura) {
   // largura: cabe tudo na tela sempre que possível; só rola quando os períodos não cabem
   const n = linhas.length;
   const L = Math.max(280, Math.round(largura || 860));
-  const minimo = comProv && pilha.length ? 80 : 74; // espaço para o valor em reais escrito por extenso
+  const minimo = per === 'ano' ? 78 : comMerc && comProv ? 96 : (comProv && pilha.length) || comMerc ? 86 : 74; // espaço para o valor em reais escrito por extenso
   const slot = n * minimo <= L ? L / Math.max(n, 1) : minimo;
   const W = Math.round(n * slot);
-  const H = 280, topo = 46, base = 30;
+  const H = comMerc ? 300 : 280, topo = comMerc ? 62 : 46, base = 30;
   const alt = H - topo - base;
-  const maxV = Math.max(1, ...linhas.map((l) => Math.max(inv(l), comProv ? l.proventos : 0)));
+  const maxV = Math.max(1, ...linhas.map((l, i) => Math.max(inv(l), comProv ? l.proventos : 0, merc[i] || 0)));
   const y = (v) => topo + alt * (1 - v / maxV);
   const duas = pilha.length && comProv;
   const wInv = Math.min(56, Math.max(18, slot * (duas ? 0.38 : 0.5)));
@@ -644,11 +714,17 @@ function htmlGrafico(largura) {
       acc += v;
     });
     const prov = comProv && l.proventos ? barra(xProv, y(l.proventos), wProv, y(0) - y(l.proventos), 4, 's-prov') : '';
-    const topoBarra = Math.min(acc ? y(acc) : H, comProv && l.proventos ? y(l.proventos) : H);
+    const topoBarra = Math.min(acc ? y(acc) : H, comProv && l.proventos ? y(l.proventos) : H, merc[i] ? y(merc[i]) - 6 : H);
+    const [tx, anc] = slot >= 112 ? [cx, 'middle'] : i === 0 ? [i * slot + 4, 'start'] : i === n - 1 ? [(i + 1) * slot - 4, 'end'] : [cx, 'middle'];
     let rot = '';
-    if (acc && comProv && l.proventos) rot = `<text class="v" x="${cx}" y="${topoBarra - 22}" text-anchor="middle">${reais(acc)}</text><text class="v2" x="${cx}" y="${topoBarra - 8}" text-anchor="middle">+ ${reais(l.proventos)}</text>`;
-    else if (acc) rot = `<text class="v" x="${cx}" y="${topoBarra - 8}" text-anchor="middle">${reais(acc)}</text>`;
-    else if (comProv && l.proventos) rot = `<text class="v" x="${cx}" y="${topoBarra - 8}" text-anchor="middle">${reais(l.proventos)}</text>`;
+    if (merc[i] != null && acc) {
+      const ganho = merc[i] - acc;
+      rot = `<text class="v" x="${tx}" y="${topoBarra - (comProv && l.proventos ? 36 : 22)}" text-anchor="${anc}">${reais(merc[i])}</text>`
+        + `<text class="v2 ${ganho >= 0 ? 'ganho' : 'perda'}" x="${tx}" y="${topoBarra - (comProv && l.proventos ? 22 : 8)}" text-anchor="${anc}">${ganho >= 0 ? '+' : '−'} ${reais(Math.abs(ganho))}</text>`
+        + (comProv && l.proventos ? `<text class="v2" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">prov. ${reais(l.proventos)}</text>` : '');
+    } else if (acc && comProv && l.proventos) rot = `<text class="v" x="${tx}" y="${topoBarra - 22}" text-anchor="${anc}">${reais(acc)}</text><text class="v2" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">+ ${reais(l.proventos)}</text>`;
+    else if (acc) rot = `<text class="v" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">${reais(acc)}</text>`;
+    else if (comProv && l.proventos) rot = `<text class="v" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">${reais(l.proventos)}</text>`;
     return `<g class="slot ${i === sel ? 'sel' : ''}" data-graf-slot="${i}">
       <rect class="alvo" x="${i * slot + 3}" y="4" width="${slot - 6}" height="${H - 8}" rx="10"/>
       ${segs}${prov}${rot}
@@ -656,10 +732,13 @@ function htmlGrafico(largura) {
     </g>`;
   }).join('');
 
+  const pts = merc.map((v, i) => (v != null ? [i * slot + slot / 2, y(v)] : null));
+  const linhaMerc = comMerc && HIST ? `<polyline class="linha-merc" points="${pts.filter(Boolean).map((p) => p.join(',')).join(' ')}"/>${pts.map((p, i) => (p ? `<circle class="ponto-merc ${i === sel ? 'sel' : ''}" cx="${p[0]}" cy="${p[1]}" r="${i === sel ? 5 : 3}"/>` : '')).join('')}` : '';
+
   const l = linhas[sel];
   const itens = l ? [...pilha.map((k) => [SERIES.find((x) => x.k === k).nome, l[k], k]), ...(comProv ? [['Proventos', l.proventos, 'prov']] : [])].filter(([, v]) => v > 0) : [];
   const detalhe = l ? `
-    <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(l.chave, per)}</b>${pilha.length ? `<span>Investido <b>${R(inv(l))}</b></span>` : ''}</div>
+    <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(l.chave, per)}</b>${pilha.length ? `<span>Investido <b>${R(inv(l))}</b>${merc[sel] != null ? ` · Valia <b>${R(merc[sel])}</b> <span class="${merc[sel] >= inv(l) ? 'var-alta' : 'var-baixa'}">${merc[sel] >= inv(l) ? '+' : '−'}${R(Math.abs(merc[sel] - inv(l)))} (${pct(inv(l) ? merc[sel] / inv(l) - 1 : null)})</span>` : ''}</span>` : ''}</div>
     ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, k]) => `<span><i class="sw s-${k}"></i>${nome}<b>${R(v)}</b></span>`).join('')}</div>` : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}` : '';
 
   return `
@@ -667,7 +746,7 @@ function htmlGrafico(largura) {
       <div class="graf-topo">
         <div>
           <h2>${acum ? 'Total acumulado' : 'Quanto investi'}</h2>
-          <small class="sub-cab">${pilha.length ? `Investido <b>${R(totInv)}</b>` : ''}${pilha.length && comProv ? ' · ' : ''}${comProv ? `Proventos <b>${R(totProv)}</b>` : ''}</small>
+          <small class="sub-cab">${pilha.length ? `Investido <b>${R(totInv)}</b>` : ''}${comMerc && HIST && merc[n - 1] != null ? ` · Vale hoje <b>${R(merc[n - 1])}</b> <span class="${merc[n - 1] >= totInv ? 'var-alta' : 'var-baixa'}">${pct(totInv ? merc[n - 1] / totInv - 1 : null)}</span>` : ''}${comMerc && !HIST ? ' · calculando o valor de mercado…' : ''}${pilha.length && comProv ? ' · ' : ''}${comProv ? `Proventos <b>${R(totProv)}</b>` : ''}</small>
         </div>
         <div class="graf-controles">
           <div class="seg" role="group" aria-label="Mostrar">
@@ -682,7 +761,7 @@ function htmlGrafico(largura) {
         ${presentes.map((x) => `<button type="button" class="filtro" data-graf-serie="${x.k}" aria-pressed="${ativos.has(x.k)}"><i class="sw s-${x.k}"></i>${x.nome}</button>`).join('')}
       </div>
       ${n ? `<div class="graf-rolagem" data-largura="${L}"><svg class="grafico" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Investimentos${comProv ? ' e proventos' : ''} por ${per === 'mes' ? 'mês' : per}${acum ? ', acumulado' : ''}">
-        ${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}</svg></div>
+        ${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}${linhaMerc}</svg></div>
       <div class="graf-detalhe">${detalhe}</div>` : '<p class="dica">Ainda não há compras nem proventos para mostrar.</p>'}
     </section>`;
 }
@@ -712,6 +791,7 @@ function ligarGrafico() {
       lista.has(t.dataset.grafSerie) ? lista.delete(t.dataset.grafSerie) : lista.add(t.dataset.grafSerie);
       if (!lista.size) return; // sempre fica pelo menos uma série
       G.hist = [...lista];
+      if (t.dataset.grafSerie === 'mercado') G.semMercado = !lista.has('mercado');
     }
     if (t.dataset.grafSlot) G.sel = Number(t.dataset.grafSlot);
     salvarG();

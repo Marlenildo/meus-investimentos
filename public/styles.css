@@ -73,6 +73,20 @@ button, input, select { font: inherit; color: inherit; }
 .banco-sel select option { color: #13201C; background: #fff; }
 @media (prefers-color-scheme: dark) { .banco-sel select { background: var(--folha-2); border-color: var(--linha); } .banco-sel select option { color: var(--tinta); background: var(--folha); } }
 
+.marca { margin-right: auto; }
+.nuvem-st { font-size: 0.78rem; font-weight: 500; padding: 4px 10px 4px 22px; border-radius: 99px; color: inherit; text-decoration: none; position: relative; background: rgb(255 255 255 / 12%); white-space: nowrap; }
+.nuvem-st::before { content: ""; position: absolute; left: 9px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: #9FE3C7; }
+.nuvem-st.pend::before { background: #F2D27A; }
+.nuvem-st.off::before { background: #FF9A8B; }
+.nuvem-st.local::before { background: rgb(255 255 255 / 55%); }
+@media (prefers-color-scheme: dark) {
+  .nuvem-st { background: var(--folha-2); border: 1px solid var(--linha); }
+  .nuvem-st::before { background: var(--alta); }
+  .nuvem-st.pend::before { background: var(--alerta); }
+  .nuvem-st.off::before { background: var(--baixa); }
+  .nuvem-st.local::before { background: var(--tinta-3); }
+}
+
 /* ---------- boleta (resumo fixo) ---------- */
 .boleta { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--folha); border-bottom: 1px solid var(--linha); box-shadow: var(--sombra); }
 .boleta-in { padding-block: 10px 12px; display: grid; gap: 8px; }

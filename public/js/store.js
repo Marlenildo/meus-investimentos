@@ -18,7 +18,7 @@ export const BANCOS_PADRAO = [
   { id: 'c6', nome: 'C6 Bank', corretagem: 0 },
 ].map((b) => ({ taxaB3: TAXA_B3_PADRAO, taxaTesouro: 0, ...b }));
 
-const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+const uid = () => (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 16) : Math.random().toString(36).slice(2, 12).padEnd(10, '0') + Date.now().toString(36).slice(-4));
 export { uid };
 
 function estadoInicial() {
@@ -97,4 +97,34 @@ export async function importar(file) {
 
 export function resetar() {
   return estadoInicial();
+}
+
+/** O que vai para a nuvem numa substituição completa. */
+export function paraNuvem(estado) {
+  const { ajustes, bancos, plano, ativos, compras, proventos } = estado;
+  return { ajustes, bancos, plano, ativos, compras, proventos };
+}
+
+/**
+ * Junta o que veio da nuvem com o que está no navegador.
+ * A nuvem manda em tudo, exceto nas cotações: fica a mais recente de cada ativo.
+ */
+export function juntarComNuvem(local, srv) {
+  const precoLocal = new Map(local.ativos.map((a) => [a.ticker, a]));
+  const ativos = srv.ativos.map((a) => {
+    const l = precoLocal.get(a.ticker);
+    if (l?.precoEm && (!a.precoEm || new Date(l.precoEm) > new Date(a.precoEm))) {
+      return { ...a, preco: l.preco, precoEm: l.precoEm, fonte: l.fonte };
+    }
+    return a;
+  });
+  return migrar({
+    ...local,
+    ajustes: srv.ajustes ?? local.ajustes,
+    bancos: srv.bancos ?? local.bancos,
+    plano: srv.plano ?? local.plano,
+    ativos,
+    compras: srv.compras,
+    proventos: srv.proventos,
+  });
 }

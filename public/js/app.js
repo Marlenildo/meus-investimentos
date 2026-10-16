@@ -2,15 +2,25 @@ import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
   mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, aportesPorMes,
 } from './calc.js';
-import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO } from './store.js';
+import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
+import * as N from './nuvem.js';
 
 // ---------- estado ----------
 let S = carregar();
 const statusCotacao = {}; // ativoId -> {erro?, variacao?}
 let atualizando = false;
+let ultimaBusca = 0; // quando as cotações foram buscadas pela última vez nesta sessão
 
-const persist = () => { if (!salvar(S)) toast('Não consegui salvar neste navegador. Faça um backup em Ajustes.'); };
+/** Salva no navegador e manda para a nuvem as partes que mudaram ('ajustes' | 'bancos' | 'plano' | 'ativos'). */
+const persist = (...mudou) => {
+  if (!salvar(S) && !N.ativa()) toast('Não consegui salvar neste navegador. Faça um backup em Ajustes.');
+  for (const k of mudou) {
+    if (k === 'ativos') N.salvarAtivos(S.ativos);
+    else N.salvarConfig(k, S[k]);
+  }
+};
+const temCotacaoAutomatica = () => N.ativa() || Boolean(S.ajustes.token);
 
 // ---------- formatação ----------
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -75,7 +85,7 @@ function renderBancos() {
 }
 $('#banco').addEventListener('change', (e) => {
   S.ajustes.banco = e.target.value;
-  persist();
+  persist('ajustes');
   render();
 });
 
@@ -158,7 +168,7 @@ function renderComprar() {
   const mesAnt = mesAnterior(S.plano.mes);
   const auto = proventosAuto();
   const manual = S.plano.proventosManual != null;
-  const semToken = !S.ajustes.token;
+  const semToken = !temCotacaoAutomatica();
   return `
     <section class="bloco">
       <div class="bloco-cab"><h2>Compra de ${nomeMesAno(S.plano.mes)}</h2></div>
@@ -206,16 +216,16 @@ function ligarComprar() {
     const v = num(e.target.value);
     S.plano.aporte = Number.isFinite(v) ? Math.max(0, v) : null;
     e.target.value = aporteMes().toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-    persist(); atualizarDisp();
+    persist('plano'); atualizarDisp();
   });
   $('#in-proventos').addEventListener('change', (e) => {
     const v = num(e.target.value);
     S.plano.proventosManual = Number.isFinite(v) ? Math.max(0, v) : null;
-    persist(); render();
+    persist('plano'); render();
   });
-  $('#prov-auto')?.addEventListener('click', () => { S.plano.proventosManual = null; persist(); render(); });
+  $('#prov-auto')?.addEventListener('click', () => { S.plano.proventosManual = null; persist('plano'); render(); });
   $('#btn-cotacoes').addEventListener('click', atualizarCotacoes);
-  $('#btn-limpar').addEventListener('click', () => { S.plano.qtds = {}; persist(); render(); });
+  $('#btn-limpar').addEventListener('click', () => { S.plano.qtds = {}; persist('plano'); render(); });
   $('#btn-registrar').addEventListener('click', abrirRegistrar);
 
   const setQtd = (id, q, repintarInput = true) => {
@@ -223,7 +233,7 @@ function ligarComprar() {
     q = normalizaQtd(a, q);
     if (q > 0) S.plano.qtds[id] = q; else delete S.plano.qtds[id];
     if (repintarInput) $(`#q-${id}`).value = q || '';
-    persist(); pintarTotais();
+    persist('plano'); pintarTotais();
   };
 
   main.addEventListener('input', (e) => {
@@ -241,7 +251,7 @@ function ligarComprar() {
         a.preco = v; a.precoEm = new Date().toISOString(); a.fonte = 'manual';
         delete statusCotacao[a.id];
       }
-      persist();
+      persist('ativos');
       const f = frescor(a);
       const fr = e.target.parentElement.querySelector('.frescor');
       fr.className = `frescor ${f.cls}`; fr.textContent = f.txt;
@@ -274,10 +284,11 @@ function ligarComprar() {
 async function atualizarCotacoes() {
   if (atualizando) return;
   atualizando = true;
+  ultimaBusca = Date.now();
   if (location.hash.replace('#', '') === 'comprar' || !location.hash) render();
   const { ok, erros, total } = await atualizarTodas(S.ativos, S.ajustes.token, (a, q, err) => {
     if (q) {
-      a.preco = q.preco; a.precoEm = q.em; a.fonte = 'brapi';
+      a.preco = q.preco; a.precoEm = q.em; a.fonte = q.fonte || 'brapi';
       if (!a.nome && q.nome) a.nome = q.nome;
       statusCotacao[a.id] = { variacao: q.variacao };
     } else {
@@ -340,11 +351,11 @@ function abrirRegistrar() {
     if (dlg.returnValue !== 'ok') return;
     const data = $('#reg-data').value || hojeISO();
     const xs = coletar();
-    for (const x of xs) {
-      S.compras.push({ id: uid(), data, ticker: x.ativo.ticker, tipo: x.ativo.tipo, qtd: x.qtd, preco: x.preco, custo: x.custo, banco: x.banco });
-    }
+    const novas = xs.map((x) => ({ id: uid(), data, ticker: x.ativo.ticker, tipo: x.ativo.tipo, qtd: x.qtd, preco: x.preco, custo: x.custo, banco: x.banco }));
+    S.compras.push(...novas);
+    N.adicionarCompras(novas);
     S.plano.qtds = {};
-    persist();
+    persist('plano');
     toast(`${xs.length} ${xs.length === 1 ? 'compra registrada' : 'compras registradas'}.`);
     render();
   };
@@ -454,7 +465,9 @@ function ligarRemover(attr, colecao) {
     }
     const id = b.getAttribute(attr);
     S[colecao] = S[colecao].filter((x) => x.id !== id);
-    persist(); render(); toast('Removido.');
+    if (colecao === 'compras') N.removerCompra(id);
+    if (colecao === 'proventos') N.removerProvento(id);
+    persist(...(colecao === 'ativos' ? ['ativos'] : [])); render(); toast('Removido.');
   });
 }
 
@@ -506,7 +519,9 @@ function ligarProventos() {
     e.preventDefault();
     const v = num($('#pv-valor').value);
     if (!Number.isFinite(v) || v <= 0) { toast('Informe o valor recebido.'); return; }
-    S.proventos.push({ id: uid(), data: $('#pv-data').value, ticker: sel.value, tipo: tipo.value, valor: round2(v) });
+    const p = { id: uid(), data: $('#pv-data').value || hojeISO(), ticker: sel.value, tipo: tipo.value, valor: round2(v) };
+    S.proventos.push(p);
+    N.adicionarProvento(p);
     persist(); render(); toast('Provento lançado.');
   });
   ligarRemover('data-del-prov', 'proventos');
@@ -515,14 +530,32 @@ function ligarProventos() {
 // ---------- aba Ajustes ----------
 function renderAjustes() {
   const pctTxt = (f) => (Number(f || 0) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+  const st = N.nuvem.estado;
+  const nuvemTxt = {
+    ok: 'Ligada. Ativos, compras, proventos e ajustes ficam salvos no seu banco D1 da Cloudflare e aparecem em qualquer aparelho.',
+    pendente: 'Ligada. Enviando as últimas alterações…',
+    offline: N.nuvem.mensagem || 'Sem conexão agora. As alterações serão enviadas quando a internet voltar.',
+    local: 'Desligada. Este endereço não tem o servidor da Cloudflare, então os dados ficam só neste navegador.',
+    config: N.nuvem.mensagem || 'O servidor precisa de configuração.',
+    senha: 'Aguardando a senha.',
+    verificando: 'Verificando…',
+  }[st];
   return `
+    <section class="bloco">
+      <div class="bloco-cab"><h2>Nuvem</h2>${N.ativa() ? '<button type="button" class="btn peq" id="nv-sair">Sair neste aparelho</button>' : ''}</div>
+      <p class="dica">${esc(nuvemTxt)}</p>
+    </section>
+
     <section class="bloco">
       <h2>Aporte e cotações</h2>
       <div class="campos">
         <label class="campo"><span>Aporte mensal padrão (R$)</span><input id="aj-aporte" class="num" inputmode="decimal" value="${Number(S.ajustes.aporteMensal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"></label>
         <label class="campo" style="grid-column: span 2"><span>Token da brapi.dev</span><input id="aj-token" type="password" autocomplete="off" value="${esc(S.ajustes.token)}" placeholder="cole aqui o token gratuito"></label>
       </div>
-      <p class="dica">O token é grátis em <a href="https://brapi.dev/dashboard" target="_blank" rel="noopener">brapi.dev/dashboard</a> (15 mil consultas por mês, atraso de ~30 min). Fica salvo só neste navegador. Tesouro Direto não tem cotação automática: copie o preço de compra do <a href="https://www.tesourodireto.com.br/titulos/precos-e-taxas.htm" target="_blank" rel="noopener">site do Tesouro</a> e digite na aba Comprar.</p>
+      <p class="dica">${N.ativa()
+        ? 'Com a nuvem ligada, as cotações vêm do Yahoo Finance (atraso de ~15 min, como em todo serviço gratuito da B3) e o token da brapi é só reserva, opcional.'
+        : 'Sem a nuvem, as cotações vêm direto da brapi: o token é grátis em <a href="https://brapi.dev/dashboard" target="_blank" rel="noopener">brapi.dev/dashboard</a> (atraso de ~30 min).'}
+      Tesouro Direto não tem cotação automática: copie o preço de compra do <a href="https://www.tesourodireto.com.br/titulos/precos-e-taxas.htm" target="_blank" rel="noopener">site do Tesouro</a> e digite na aba Comprar.</p>
     </section>
 
     <section class="bloco">
@@ -559,7 +592,9 @@ function renderAjustes() {
 
     <section class="bloco">
       <h2>Backup</h2>
-      <p class="dica">Seus dados ficam só neste navegador. Exporte um backup de vez em quando e importe para usar em outro aparelho.</p>
+      <p class="dica">${N.ativa()
+        ? 'Seus dados já ficam na nuvem. O backup é uma cópia extra: importar um backup substitui tudo, aqui e na nuvem.'
+        : 'Seus dados ficam só neste navegador. Exporte um backup de vez em quando e importe para usar em outro aparelho.'}</p>
       <div class="acoes">
         <button type="button" class="btn" id="bk-exportar">Exportar backup</button>
         <label class="btn" for="bk-importar">Importar backup</label>
@@ -575,11 +610,11 @@ function ligarAjustes() {
     const v = num(e.target.value);
     if (Number.isFinite(v) && v >= 0) S.ajustes.aporteMensal = v;
     e.target.value = Number(S.ajustes.aporteMensal).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-    persist(); renderBoleta(); toast('Aporte padrão salvo.');
+    persist('ajustes'); renderBoleta(); toast('Aporte padrão salvo.');
   });
   $('#aj-token').addEventListener('change', async (e) => {
     S.ajustes.token = e.target.value.trim();
-    persist();
+    persist('ajustes');
     if (!S.ajustes.token) return;
     try { await buscarCotacao('BBAS3', S.ajustes.token); toast('Token funcionando.'); }
     catch (err) { toast(`Token salvo, mas a brapi respondeu: ${err.message}.`); }
@@ -593,15 +628,15 @@ function ligarAjustes() {
     if (S.ativos.some((a) => a.ticker.toLowerCase() === ticker.toLowerCase())) { toast(`${ticker} já está na lista.`); return; }
     const novo = { id: uid(), ticker, tipo, nome: $('#at-nome').value.trim() || (tipo === 'tesouro' ? ticker : ''), preco: null, precoEm: null, fonte: null };
     S.ativos.push(novo);
-    persist(); render(); toast(`${ticker} adicionado.`);
+    persist('ativos'); render(); toast(`${ticker} adicionado.`);
     if (tipo !== 'tesouro') buscarCotacao(ticker, S.ajustes.token).then((q) => {
-      novo.preco = q.preco; novo.precoEm = q.em; novo.fonte = 'brapi'; if (!novo.nome && q.nome) novo.nome = q.nome; persist();
+      novo.preco = q.preco; novo.precoEm = q.em; novo.fonte = q.fonte || 'brapi'; if (!novo.nome && q.nome) novo.nome = q.nome; persist();
       if (location.hash === '#ajustes') render();
     }).catch(() => {});
   });
   $('#conteudo').addEventListener('click', (e) => {
     const s = e.target.closest('[data-subir]');
-    if (s) { const i = Number(s.dataset.subir); [S.ativos[i - 1], S.ativos[i]] = [S.ativos[i], S.ativos[i - 1]]; persist(); render(); }
+    if (s) { const i = Number(s.dataset.subir); [S.ativos[i - 1], S.ativos[i]] = [S.ativos[i], S.ativos[i - 1]]; persist('ativos'); render(); }
   });
   ligarRemover('data-del-ativo', 'ativos');
   $('#conteudo').addEventListener('change', (e) => {
@@ -610,25 +645,26 @@ function ligarAjustes() {
     const b = S.bancos.find((x) => x.id === id);
     const v = num(e.target.value);
     if (Number.isFinite(v) && v >= 0) b[e.target.dataset.campo] = e.target.dataset.campo === 'corretagem' ? v : v / 100;
-    persist(); render();
+    persist('bancos'); render();
   });
   $('#bk-padrao').addEventListener('click', () => {
     const extras = S.bancos.filter((b) => !BANCOS_PADRAO.some((p) => p.id === b.id));
     S.bancos = [...BANCOS_PADRAO.map((b) => ({ ...b })), ...extras];
-    persist(); render(); toast('Custos de referência restaurados.');
+    persist('bancos'); render(); toast('Custos de referência restaurados.');
   });
   $('#bk-exportar').addEventListener('click', () => exportar(S));
   $('#bk-importar').addEventListener('change', async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    try { S = await importar(f); persist(); renderBancos(); render(); toast('Backup importado.'); }
+    try { S = await importar(f); persist(); N.substituirTudo(paraNuvem(S)); renderBancos(); render(); toast('Backup importado.'); }
     catch (err) { toast(err.message || 'Não consegui ler esse arquivo.'); }
   });
   const apagar = $('#bk-apagar');
   apagar.addEventListener('click', () => {
     if (!apagar.dataset.ok) { apagar.dataset.ok = '1'; apagar.textContent = 'Tem certeza? Toque de novo'; setTimeout(() => { if (apagar.isConnected) { delete apagar.dataset.ok; apagar.textContent = 'Apagar tudo'; } }, 4000); return; }
-    S = resetar(); persist(); renderBancos(); render(); toast('Dados apagados.');
+    S = resetar(); persist(); N.substituirTudo(paraNuvem(S)); renderBancos(); render(); toast(N.ativa() ? 'Dados apagados aqui e na nuvem.' : 'Dados apagados.');
   });
+  $('#nv-sair')?.addEventListener('click', () => { N.sair(); render(); });
 }
 
 // ---------- roteamento ----------
@@ -639,6 +675,37 @@ const ABAS = {
   ajustes: [renderAjustes, ligarAjustes],
 };
 
+// tela de senha e avisos da nuvem, mostrados acima de qualquer aba
+function htmlNuvemTopo() {
+  const st = N.nuvem.estado;
+  if (st === 'senha') {
+    return `
+      <section class="bloco entrar">
+        <h2>Entrar</h2>
+        <p class="dica">Digite a senha que você definiu na Cloudflare (variável SENHA) para carregar seus dados salvos na nuvem.</p>
+        <form id="form-senha" class="campos">
+          <label class="campo"><span>Senha</span><input type="password" id="nv-senha" autocomplete="current-password" required></label>
+          <button class="btn prim" type="submit">Entrar</button>
+        </form>
+        ${N.nuvem.mensagem ? `<p class="aviso"><b>${esc(N.nuvem.mensagem)}</b></p>` : ''}
+      </section>`;
+  }
+  if (st === 'config') return `<p class="aviso"><b>Nuvem não configurada:</b> ${esc(N.nuvem.mensagem)} Até lá, os dados ficam só neste navegador.</p>`;
+  return '';
+}
+
+function renderNuvem() {
+  const el = $('#nuvem');
+  const t = {
+    ok: ['Salvo na nuvem', 'ok'], pendente: ['Salvando…', 'pend'], offline: ['Sem conexão', 'off'],
+    local: ['Só neste aparelho', 'local'], config: ['Nuvem não configurada', 'off'], senha: ['Entrar', 'off'], verificando: ['', ''],
+  }[N.nuvem.estado] || ['', ''];
+  el.textContent = t[0];
+  el.className = `nuvem-st ${t[1]}`;
+  el.hidden = !t[0];
+  el.title = N.nuvem.mensagem || '';
+}
+
 function render() {
   const aba = ABAS[location.hash.slice(1)] ? location.hash.slice(1) : 'comprar';
   document.querySelectorAll('.abas a').forEach((a) => a.classList.toggle('ativa', a.dataset.aba === aba));
@@ -647,22 +714,63 @@ function render() {
   const novo = velho.cloneNode(false);
   velho.replaceWith(novo);
   const [html, ligar] = ABAS[aba];
-  novo.innerHTML = html();
+  novo.innerHTML = htmlNuvemTopo() + html();
   ligar();
+  $('#form-senha')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector('button');
+    btn.disabled = true; btn.textContent = 'Entrando…';
+    aplicarNuvem(await N.entrar($('#nv-senha').value));
+  });
   renderBoleta();
+  renderNuvem();
 }
 
 window.addEventListener('hashchange', () => { render(); window.scrollTo({ top: 0 }); });
+N.aoMudar(() => {
+  renderNuvem();
+  // a tela de senha aparece/some conforme o estado
+  const temEntrar = Boolean($('.entrar'));
+  if (temEntrar !== (N.nuvem.estado === 'senha')) render();
+});
+
+function aplicarNuvem(srv) {
+  if (srv) {
+    if (srv.vazio) {
+      // primeira vez: sobe o que está neste navegador
+      N.substituirTudo(paraNuvem(S));
+      toast('Nuvem ligada. Seus dados deste aparelho foram enviados.');
+    } else {
+      S = juntarComNuvem(S, srv);
+      salvar(S);
+      renderBancos();
+    }
+  }
+  render();
+  cotacoesAoAbrir();
+}
+
+const cotacoesVelhas = (min) => Date.now() - ultimaBusca > min * 60000;
+
+function cotacoesAoAbrir() {
+  if (!cotacoesVelhas(5)) return;
+  if (temCotacaoAutomatica()) { atualizarCotacoes(); return; }
+  // sem nuvem e sem token: só os ativos liberados na brapi
+  const livres = S.ativos.filter((a) => ['PETR4', 'VALE3', 'ITUB4', 'MGLU3'].includes(a.ticker));
+  if (livres.length) {
+    atualizarTodas(livres, '', (a, q) => { if (q) { a.preco = q.preco; a.precoEm = q.em; a.fonte = q.fonte || 'brapi'; statusCotacao[a.id] = { variacao: q.variacao }; } })
+      .then(() => { persist(); if (!location.hash || location.hash === '#comprar') render(); });
+  }
+}
+
+// com a tela aberta na aba Comprar, atualiza as cotações a cada 5 minutos
+setInterval(() => {
+  const naCompra = !location.hash || location.hash === '#comprar';
+  const digitando = document.activeElement?.matches?.('input, select');
+  if (document.visibilityState === 'visible' && naCompra && !digitando && !$('#dlg-registrar').open && temCotacaoAutomatica() && cotacoesVelhas(5)) atualizarCotacoes();
+}, 60000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && temCotacaoAutomatica() && cotacoesVelhas(5)) atualizarCotacoes(); });
 
 renderBancos();
 render();
-
-// atualiza sozinho ao abrir se tiver token e a última cotação for antiga (> 15 min)
-const precisa = S.ativos.some((a) => a.tipo !== 'tesouro' && (!a.precoEm || Date.now() - new Date(a.precoEm) > 15 * 60000));
-if (S.ajustes.token && precisa) atualizarCotacoes();
-else if (!S.ajustes.token && precisa) {
-  // sem token: só tenta os ativos liberados na brapi
-  const livres = S.ativos.filter((a) => ['PETR4', 'VALE3', 'ITUB4', 'MGLU3'].includes(a.ticker));
-  if (livres.length) atualizarTodas(livres, '', (a, q) => { if (q) { a.preco = q.preco; a.precoEm = q.em; a.fonte = 'brapi'; statusCotacao[a.id] = { variacao: q.variacao }; } })
-    .then(() => { persist(); if (!location.hash || location.hash === '#comprar') render(); });
-}
+N.iniciar().then(aplicarNuvem);

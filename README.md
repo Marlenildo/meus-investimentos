@@ -33,6 +33,12 @@ Daí em diante, cada mudança enviada para a branch `main` publica sozinha.
 
 - `BRAPI_TOKEN` (Secret): token grátis da brapi.dev, usado só como reserva se o Yahoo falhar.
 
+## Trazer a planilha antiga
+
+Em **Ajustes → Trazer a planilha antiga**, escolha o arquivo `planilha-acoes.json` (gerado a partir do Excel: valor gasto por ativo em cada mês, Tesouro e proventos). O app busca o preço de cada mês no Yahoo pelo Worker, estima quantas cotas foram compradas (os preços andam de centavo em centavo, então ele escolhe a quantidade que dá um preço redondo dentro da faixa do mês, já corrigida por desdobramentos), mostra um resumo e salva. Os valores ficam exatamente os da planilha; as compras aparecem como "da planilha" no Histórico. Importar de novo não duplica.
+
+Esse arquivo tem seus dados financeiros: não coloque no repositório.
+
 ## Cotações
 
 Nenhuma fonte grátis dá o preço da B3 em tempo real — a B3 cobra por isso. O app usa o **Yahoo Finance pelo Worker** (atraso de ~15 min, o mesmo do Google Finance) e a **brapi** como reserva. O horário mostrado embaixo de cada preço é o do último negócio recebido. Para o preço exato do momento, toque no preço e digite o que o app do banco mostra; na hora de registrar a compra você também corrige para o preço da nota.

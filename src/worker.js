@@ -2,7 +2,7 @@
 // - Serve o site (pasta public/) e a API em /api/*.
 // - Guarda ativos, compras, proventos e ajustes no D1 (binding DB).
 // - Busca cotações no Yahoo Finance (atraso de ~15 min na B3), com a brapi como reserva.
-// - Os dados exigem a senha definida na variável SENHA; /api/saude e /api/cotacoes são públicos.
+// - Os dados exigem a senha definida na variável SENHA; /api/saude, /api/cotacoes e /api/historico são públicos.
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS config (chave TEXT PRIMARY KEY, valor TEXT NOT NULL, atualizado_em TEXT)`,
@@ -19,6 +19,8 @@ let schemaPronto = false;
 async function garantirSchema(db) {
   if (schemaPronto) return;
   await db.batch(SCHEMA.map((s) => db.prepare(s)));
+  // colunas novas em bancos criados por versões anteriores
+  try { await db.prepare('ALTER TABLE compras ADD COLUMN importado INTEGER DEFAULT 0').run(); } catch { /* já existe */ }
   schemaPronto = true;
 }
 
@@ -77,6 +79,7 @@ const ativoLimpo = (a, i) => ({
 const compraLimpa = (c) => ({
   id: id(c.id), data: dataISO(c.data), ticker: texto(c.ticker, 60), tipo: TIPOS.has(c.tipo) ? c.tipo : 'acao',
   qtd: numero(c.qtd), preco: numero(c.preco), custo: numero(c.custo || 0), banco: texto(c.banco, 40),
+  importado: c.importado ? 1 : 0,
 });
 const proventoLimpo = (p) => ({
   id: id(p.id), data: dataISO(p.data), ticker: texto(p.ticker, 60), tipo: texto(p.tipo, 20), valor: numero(p.valor),
@@ -100,7 +103,7 @@ async function lerEstado(db) {
     bancos: config.bancos ?? null,
     plano: config.plano ?? null,
     ativos: ativos.results.map((a) => ({ id: a.id, ticker: a.ticker, tipo: a.tipo, nome: a.nome, preco: a.preco, precoEm: a.preco_em, fonte: a.fonte })),
-    compras: compras.results.map(({ criado_em, ...c }) => c),
+    compras: compras.results.map(({ criado_em, importado, ...c }) => (importado ? { ...c, importado: true } : c)),
     proventos: proventos.results.map(({ criado_em, ...p }) => p),
   };
 }
@@ -118,8 +121,8 @@ function stmtsAtivos(db, lista) {
       .bind(a.id, a.ticker, a.tipo, a.nome, a.preco, a.preco_em, a.fonte, a.ordem)),
   ];
 }
-const stmtCompra = (db, c) => db.prepare('INSERT OR REPLACE INTO compras (id, data, ticker, tipo, qtd, preco, custo, banco, criado_em) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)')
-  .bind(c.id, c.data, c.ticker, c.tipo, c.qtd, c.preco, c.custo, c.banco, agora());
+const stmtCompra = (db, c) => db.prepare('INSERT OR REPLACE INTO compras (id, data, ticker, tipo, qtd, preco, custo, banco, criado_em, importado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)')
+  .bind(c.id, c.data, c.ticker, c.tipo, c.qtd, c.preco, c.custo, c.banco, agora(), c.importado);
 const stmtProvento = (db, p) => db.prepare('INSERT OR REPLACE INTO proventos (id, data, ticker, tipo, valor, criado_em) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
   .bind(p.id, p.data, p.ticker, p.tipo, p.valor, agora());
 
@@ -170,6 +173,31 @@ async function cotacaoBrapi(ticker, token) {
   };
 }
 
+async function historicoYahoo(ticker) {
+  const simbolo = `${ticker}.SA`;
+  let ultimoErro;
+  for (const host of ['query1', 'query2']) {
+    try {
+      const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?interval=1mo&range=10y`;
+      const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, cf: { cacheTtl: 86400, cacheEverything: true } });
+      if (!r.ok) throw new Error(`yahoo ${r.status}`);
+      const res = (await r.json())?.chart?.result?.[0];
+      const ts = res?.timestamp || [];
+      const q = res?.indicators?.quote?.[0] || {};
+      const meses = {};
+      ts.forEach((t, i) => {
+        const d = new Date((t + 3 * 3600) * 1000); // meia-noite de São Paulo vira o mês certo
+        const mes = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+        if (q.low?.[i] != null && q.high?.[i] != null) meses[mes] = { low: q.low[i], high: q.high[i], close: q.close?.[i] ?? null };
+      });
+      return { ticker, meses };
+    } catch (e) {
+      ultimoErro = e;
+    }
+  }
+  return { ticker, meses: {}, erro: ultimoErro?.message || 'sem histórico' };
+}
+
 async function cotacoes(tickers, brapiToken) {
   const out = {};
   await Promise.all(tickers.map(async (t) => {
@@ -200,6 +228,13 @@ async function api(req, env, url) {
     if (!tickers.length) return erro(400, 'Informe os códigos em ?t=BBAS3,PETR4');
     const token = req.headers.get('X-Brapi-Token') || env.BRAPI_TOKEN || '';
     return json(await cotacoes(tickers, token));
+  }
+
+  // histórico mensal de preços (mínima, máxima e fechamento), usado para estimar quantidades de compras antigas
+  if (caminho === 'historico' && metodo === 'GET') {
+    const t = (url.searchParams.get('t') || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{4,12}$/.test(t)) return erro(400, 'Informe o código em ?t=BBAS3');
+    return json(await historicoYahoo(t));
   }
 
   const negado = await conferirSenha(req, env);

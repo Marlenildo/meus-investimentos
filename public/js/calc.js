@@ -193,3 +193,44 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
       };
     });
 }
+
+// ---------- importar a planilha antiga (só tem o valor gasto por mês) ----------
+/**
+ * Estima a quantidade comprada a partir do valor gasto (com a taxa da B3 incluída)
+ * e da faixa de preço daquele mês (mínima/máxima/fechamento).
+ * Preços na bolsa andam de centavo em centavo: entre as quantidades possíveis,
+ * fica a que dá um preço "redondo" e mais perto do fechamento do mês.
+ */
+export function estimarCompra(valor, ref) {
+  const liquido = valor / (1 + TAXA_B3_PADRAO);
+  if (!ref || !(ref.low > 0) || !(ref.high > 0)) return null;
+  const alvo = ref.close > 0 ? ref.close : (ref.low + ref.high) / 2;
+  const qmin = Math.max(1, Math.ceil(liquido / (ref.high * 1.04)));
+  const qmax = Math.max(qmin, Math.floor(liquido / (ref.low * 0.96)));
+  const centavos = (x) => Math.abs(x * 100 - Math.round(x * 100));
+  let melhor = null;
+  for (let q = qmin; q <= Math.min(qmax, qmin + 20000); q++) {
+    const p = liquido / q;
+    const redondo = Math.min(centavos(p), centavos(valor / q)) < 0.06 ? 0 : 0.5;
+    const nota = redondo + Math.abs(p - alvo) / alvo;
+    if (!melhor || nota < melhor.nota) melhor = { q, nota };
+  }
+  const qtd = melhor ? melhor.q : Math.max(1, Math.round(liquido / alvo));
+  const preco = Math.round((liquido / qtd) * 10000) / 10000;
+  return { qtd, preco, custo: round2(valor - qtd * preco) };
+}
+
+// Selic média de cada ano, para trazer o preço atual do Tesouro Selic até a data da compra.
+const SELIC_ANO = { 2022: 0.1275, 2023: 0.1290, 2024: 0.1085, 2025: 0.1440, 2026: 0.1490 };
+
+/** Preço aproximado do Tesouro Selic no mês `ym`, a partir do preço de hoje. */
+export function precoTesouroEm(ym, precoHoje, hojeYm) {
+  let [y, m] = ym.split('-').map(Number);
+  const [yh, mh] = hojeYm.split('-').map(Number);
+  let fator = 1;
+  while (y < yh || (y === yh && m < mh)) {
+    fator *= Math.pow(1 + (SELIC_ANO[y] ?? 0.12), 1 / 12);
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return precoHoje / fator;
+}

@@ -6,7 +6,7 @@
   <title>Meus Investimentos</title>
   <meta name="description" content="Monte a compra do mês: aporte + proventos, preço atual de cada ativo, cotas e custo do banco.">
   <meta name="theme-color" content="#0a0b10">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light dark">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icone.svg" type="image/svg+xml">
   <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png">
@@ -15,19 +15,17 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="styles.css">
+  <script>try{var t=localStorage.getItem("meus-investimentos:tema");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 </head>
 <body>
   <header class="topo">
     <div class="topo-in">
       <a class="marca" href="#comprar" aria-label="Meus Investimentos — início">
-        <img src="icone.svg" width="34" height="34" alt="">
+        <img src="icone.svg" width="32" height="32" alt="">
         <span>Meus Investimentos</span>
       </a>
+      <button type="button" id="tema" class="icone-btn" aria-label="Mudar tema"></button>
       <button type="button" id="nuvem" class="nuvem-st" hidden></button>
-      <label class="banco-sel">
-        <span>Comprando pelo</span>
-        <select id="banco"></select>
-      </label>
     </div>
   </header>
 

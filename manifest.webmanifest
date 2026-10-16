@@ -1,0 +1,13 @@
+{
+  "name": "Meus Investimentos",
+  "short_name": "Investimentos",
+  "description": "Monte a compra do mês de ações, FIIs e Tesouro.",
+  "start_url": "./#comprar",
+  "display": "standalone",
+  "background_color": "#F3F5F2",
+  "theme_color": "#0B6B5C",
+  "lang": "pt-BR",
+  "icons": [
+    { "src": "icone.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

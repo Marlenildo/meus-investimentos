@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Meus Investimentos</title>
+  <meta name="description" content="Monte a compra do mês: aporte + proventos, preço atual de cada ativo, cotas e custo do banco.">
+  <meta name="theme-color" content="#0B6B5C" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0F1513" media="(prefers-color-scheme: dark)">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icone.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icone.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-in">
+      <a class="marca" href="#comprar" aria-label="Meus Investimentos — início">
+        <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor"/><path d="M8 22l5-6 4 3 7-9" fill="none" stroke="var(--acento)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Meus Investimentos</span>
+      </a>
+      <label class="banco-sel">
+        <span>Comprando pelo</span>
+        <select id="banco"></select>
+      </label>
+    </div>
+  </header>
+
+  <section class="boleta" id="boleta" aria-live="polite"></section>
+
+  <nav class="abas" aria-label="Seções">
+    <div class="abas-in">
+      <a href="#comprar" data-aba="comprar">Comprar</a>
+      <a href="#carteira" data-aba="carteira">Carteira</a>
+      <a href="#proventos" data-aba="proventos">Proventos</a>
+      <a href="#ajustes" data-aba="ajustes">Ajustes</a>
+    </div>
+  </nav>
+
+  <main id="conteudo" class="conteudo"></main>
+
+  <dialog id="dlg-registrar" class="dlg"></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

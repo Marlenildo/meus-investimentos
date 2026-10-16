@@ -753,7 +753,7 @@ async function lerPlanilha(file, avisar) {
     const p = precoTesouroEm(t.mes, tesPreco, mesDe(hojeISO()));
     const qtd = Math.round((t.valor / p) * 10000) / 10000;
     const preco = Math.round((t.valor / qtd) * 10000) / 10000;
-    compras.push({ id: `pltesouro${t.mes.replace('-', '')}`, data: `${t.mes}-15`, ticker: tesTicker, tipo: 'tesouro', qtd, preco, custo: round2(t.valor - qtd * preco), banco: dados.banco || 'nubank', importado: true });
+    compras.push({ id: `pltesouro${t.mes.replace('-', '')}`, data: `${t.mes}-15`, ticker: tesTicker, tipo: 'tesouro', qtd, preco, custo: Math.round((t.valor - qtd * preco) * 1e6) / 1e6, banco: dados.banco || 'nubank', importado: true });
   }
   const proventos = (dados.proventos || []).map((p) => ({ id: `plprov${p.mes.replace('-', '')}`, data: `${p.mes}-15`, ticker: 'Vários', tipo: 'outro', valor: p.valor }));
   return { compras, proventos, semPreco, tesTicker };

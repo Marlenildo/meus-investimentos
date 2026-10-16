@@ -217,7 +217,7 @@ export function estimarCompra(valor, ref) {
   }
   const qtd = melhor ? melhor.q : Math.max(1, Math.round(liquido / alvo));
   const preco = Math.round((liquido / qtd) * 10000) / 10000;
-  return { qtd, preco, custo: round2(valor - qtd * preco) };
+  return { qtd, preco, custo: Math.round((valor - qtd * preco) * 1e6) / 1e6 }; // fecha o valor da planilha ao centavo
 }
 
 // Selic média de cada ano, para trazer o preço atual do Tesouro Selic até a data da compra.

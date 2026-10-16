@@ -193,6 +193,7 @@ function renderComprar() {
           <button type="button" class="btn peq" id="btn-limpar">Zerar quantidades</button>
         </div>
       </div>
+      ${N.nuvem.estado === 'local' ? `<p class="aviso"><b>Nuvem desligada:</b> ${esc(N.nuvem.mensagem)} Sem ela não há senha nem dados salvos na Cloudflare.</p>` : ''}
       ${semToken ? `<p class="aviso"><b>Cotações automáticas:</b> sem token só a PETR4 atualiza. Crie um token grátis em <a href="https://brapi.dev/dashboard" target="_blank" rel="noopener">brapi.dev</a> e cole em <a href="#ajustes">Ajustes</a>. Enquanto isso, você pode digitar o preço tocando nele.</p>` : ''}
       ${S.ativos.length ? `<div class="ordens">${S.ativos.map(htmlOrdem).join('')}</div>` : `<div class="vazio"><p>Nenhum ativo na sua lista.</p><a class="btn" href="#ajustes">Adicionar ativos</a></div>`}
     </section>
@@ -535,7 +536,7 @@ function renderAjustes() {
     ok: 'Ligada. Ativos, compras, proventos e ajustes ficam salvos no seu banco D1 da Cloudflare e aparecem em qualquer aparelho.',
     pendente: 'Ligada. Enviando as últimas alterações…',
     offline: N.nuvem.mensagem || 'Sem conexão agora. As alterações serão enviadas quando a internet voltar.',
-    local: 'Desligada. Este endereço não tem o servidor da Cloudflare, então os dados ficam só neste navegador.',
+    local: `Desligada: ${N.nuvem.mensagem || 'este endereço não tem o servidor da Cloudflare.'} Os dados ficam só neste navegador.`,
     config: N.nuvem.mensagem || 'O servidor precisa de configuração.',
     senha: 'Aguardando a senha.',
     verificando: 'Verificando…',

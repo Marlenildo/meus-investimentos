@@ -52,13 +52,22 @@ async function req(metodo, caminho, corpo, extraHeaders = {}) {
 /** Descobre se existe o Worker. Retorna o estado do servidor ou null (modo só navegador). */
 export async function iniciar() {
   try {
-    const r = await fetch('/api/saude', { headers: { Accept: 'application/json' } });
+    const r = await fetch('/api/saude', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const tipo = r.headers.get('content-type') || '?';
     const j = await r.json().catch(() => null);
-    if (!r.ok || j?.app !== 'meus-investimentos') { mudar('local'); return null; }
-    if (!j.senhaDefinida) { mudar('config', 'Defina a variável SENHA no Worker na Cloudflare.'); return null; }
+    if (!r.ok || j?.app !== 'meus-investimentos') {
+      const onde = location.hostname.endsWith('.pages.dev')
+        ? 'Este endereço é do Cloudflare Pages, que só publica o site. A nuvem precisa ser criada como Worker.'
+        : location.hostname.endsWith('github.io')
+          ? 'Este endereço é do GitHub Pages, que só publica o site.'
+          : `O servidor não respondeu em ${location.host}/api (resposta ${r.status}, ${tipo.split(';')[0]}).`;
+      mudar('local', onde);
+      return null;
+    }
+    if (!j.senhaDefinida) { mudar('config', 'Defina a variável SENHA no Worker na Cloudflare (Settings → Variables and Secrets).'); return null; }
     if (!j.banco) { mudar('config', 'Ligue o banco D1 ao Worker (binding DB).'); return null; }
   } catch {
-    mudar('local');
+    mudar('local', location.protocol === 'file:' ? 'O app foi aberto como arquivo, sem servidor.' : 'Não consegui falar com o servidor.');
     return null;
   }
   if (!senha) { mudar('senha'); return null; }

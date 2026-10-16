@@ -3,7 +3,8 @@
 // e usa a brapi como reserva. Tudo numa requisição só.
 // Sem a nuvem: busca direto na brapi.dev, um ativo por vez (atraso de ~30 min no plano grátis;
 // sem token só PETR4, VALE3, ITUB4 e MGLU3).
-import { ativa, cotacoesNuvem } from './nuvem.js';
+import { nuvem, cotacoesNuvem } from './nuvem.js';
+const ativa = () => nuvem.servidor;
 
 export async function buscarCotacao(ticker, token) {
   if (ativa()) {

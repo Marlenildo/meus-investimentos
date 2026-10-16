@@ -20,7 +20,7 @@ const persist = (...mudou) => {
     else N.salvarConfig(k, S[k]);
   }
 };
-const temCotacaoAutomatica = () => N.ativa() || Boolean(S.ajustes.token);
+const temCotacaoAutomatica = () => N.nuvem.servidor || Boolean(S.ajustes.token);
 
 // ---------- formatação ----------
 const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -107,8 +107,22 @@ function renderBoleta() {
     </div>`;
 }
 
-// ---------- aba Comprar ----------
-function htmlOrdem(a) {
+// ---------- aba Comprar (tela inicial) ----------
+const fmtPreco = (v) => (v ? v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '');
+
+function posicoes() {
+  const c = carteira(S.compras, S.ativos, S.proventos);
+  return { ...c, porTicker: new Map(c.linhas.map((l) => [l.ticker, l])) };
+}
+
+function htmlPosicao(pos) {
+  if (!pos || !pos.qtd) return '<small class="pos nada">Você ainda não tem</small>';
+  const cls = pos.resultado == null ? '' : pos.resultado >= 0 ? 'var-alta' : 'var-baixa';
+  return `<small class="pos">Você tem <b>${fmtQtd(pos.qtd)} ${pos.tipo === 'tesouro' ? 'títulos' : pos.qtd === 1 ? 'cota' : 'cotas'}</b> · PM ${R(pos.precoMedio)}
+    · <b>${R(pos.valorAtual ?? pos.investido)}</b>${pos.resultadoPct != null ? ` <span class="${cls}">${pct(pos.resultadoPct)}</span>` : ''}</small>`;
+}
+
+function htmlOrdem(a, pos) {
   const q = Number(S.plano.qtds[a.id]) || 0;
   const f = frescor(a);
   const st = statusCotacao[a.id];
@@ -117,22 +131,23 @@ function htmlOrdem(a) {
   return `
     <div class="ordem ${q > 0 ? 'tem-qtd' : ''}" data-id="${a.id}">
       <div class="ordem-ativo">
-        <div class="linha1"><span class="tk">${esc(a.ticker)}</span><span class="chip ${a.tipo}">${esc(TIPOS[a.tipo]?.nome || a.tipo)}</span></div>
-        <small title="${esc(a.nome)}">${esc(a.nome || '')}</small>
+        <div class="linha1"><span class="tk">${esc(a.ticker)}</span><span class="chip ${a.tipo}">${esc(TIPOS[a.tipo]?.nome || a.tipo)}</span>${a.nome && a.nome !== a.ticker ? `<small class="nome" title="${esc(a.nome)}">${esc(a.nome)}</small>` : ''}</div>
+        ${htmlPosicao(pos)}
       </div>
       <div class="ordem-preco">
-        <input class="preco-input num" data-preco="${a.id}" inputmode="decimal" aria-label="Preço de ${esc(a.ticker)}" value="${a.preco ? a.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}" placeholder="R$ 0,00">
-        <span class="frescor ${f.cls}">${esc(f.txt)}${varTxt}</span>
+        <input class="preco-input num" data-preco="${a.id}" inputmode="decimal" aria-label="Preço de ${esc(a.ticker)}" value="${fmtPreco(a.preco)}" placeholder="preço">
+        <span class="frescor ${f.cls}" data-frescor="${a.id}">${esc(f.txt)}${varTxt}</span>
       </div>
       <div class="ordem-qtd">
         <div class="qtd">
           <button type="button" data-menos="${a.id}" aria-label="Menos ${esc(a.ticker)}">−</button>
-          <input type="number" id="q-${a.id}" data-qtd="${a.id}" min="0" step="${passo}" inputmode="${passo === 1 ? 'numeric' : 'decimal'}" value="${q || ''}" placeholder="0" aria-label="Quantidade de ${esc(a.ticker)}">
+          <input type="number" id="q-${a.id}" data-qtd="${a.id}" min="0" step="${passo}" inputmode="${passo === 1 ? 'numeric' : 'decimal'}" value="${q || ''}" placeholder="0" aria-label="Quantidade de ${esc(a.ticker)} para comprar">
           <button type="button" data-mais="${a.id}" aria-label="Mais ${esc(a.ticker)}">+</button>
           <button type="button" class="max" data-max="${a.id}" title="Preencher com o que falta usar">MÁX</button>
         </div>
       </div>
       <div class="ordem-total" data-total="${a.id}"></div>
+      <button type="button" class="x x-del" data-del-ativo="${a.id}" title="Tirar ${esc(a.ticker)} da lista" aria-label="Tirar ${esc(a.ticker)} da lista">✕</button>
     </div>`;
 }
 
@@ -146,7 +161,7 @@ function pintarTotais() {
     const aviso = avisoMinimo(a, q);
     el.innerHTML = q > 0
       ? `<span class="num">${R(l.valor)}</span><small>${aviso ? `<span class="warn">${esc(aviso)}</span>` : l.custo ? `+ ${R(l.custo)} custos` : 'sem custo'}</small>`
-      : `<span class="num" style="color:var(--tinta-3)">—</span>`;
+      : `<span class="num apagado">—</span>`;
     el.closest('.ordem').classList.toggle('tem-qtd', q > 0);
   }
   const r = resumo();
@@ -155,7 +170,7 @@ function pintarTotais() {
     box.innerHTML = `
       <div class="ln"><span>Ativos (${r.ordens} ${r.ordens === 1 ? 'ordem' : 'ordens'})</span><span class="num">${R(r.bruto)}</span></div>
       <div class="ln"><span>Custos no ${esc(b.nome)} <small>(corretagem + taxas B3)</small></span><span class="num">${R(r.custos)}</span></div>
-      <div class="ln total"><span>Total a investir</span><span class="num">${R(r.total)}</span></div>`;
+      <div class="ln total"><span>Total da compra</span><span class="num">${R(r.total)}</span></div>`;
     const comp = S.bancos.map((bk) => ({ bk, c: resumo(bk).custos })).sort((x, y) => x.c - y.c);
     $('#comparar').innerHTML = r.ordens ? `<small style="width:100%">Custos desta compra em cada banco:</small>` + comp.map(({ bk, c }) =>
       `<span class="${bk.id === b.id ? 'atual' : ''}">${esc(bk.nome)} <b class="num">${R(c)}</b></span>`).join('') : '';
@@ -164,18 +179,66 @@ function pintarTotais() {
   renderBoleta();
 }
 
+/** Atualiza só os preços na tela, sem redesenhar (não atrapalha quem está digitando). */
+function pintarPrecos() {
+  for (const a of S.ativos) {
+    const inp = document.querySelector(`[data-preco="${a.id}"]`);
+    if (inp && document.activeElement !== inp) inp.value = fmtPreco(a.preco);
+    const fr = document.querySelector(`[data-frescor="${a.id}"]`);
+    if (fr) {
+      const f = frescor(a);
+      const st = statusCotacao[a.id];
+      fr.className = `frescor ${f.cls}`;
+      fr.innerHTML = esc(f.txt) + (st?.variacao != null ? ` <span class="${st.variacao >= 0 ? 'var-alta' : 'var-baixa'}">${pct(st.variacao / 100)}</span>` : '');
+    }
+  }
+  const cart = posicoes();
+  for (const a of S.ativos) {
+    const el = document.querySelector(`.ordem[data-id="${a.id}"] .pos`);
+    if (el) el.outerHTML = htmlPosicao(cart.porTicker.get(a.ticker));
+  }
+  const res = $('#resumo-cart');
+  if (res) res.outerHTML = htmlResumoCarteira(cart);
+  const btn = $('#btn-cotacoes');
+  if (btn) { btn.disabled = atualizando; btn.textContent = atualizando ? 'Atualizando…' : 'Atualizar cotações'; }
+  pintarTotais();
+}
+
+function htmlResumoCarteira(cart) {
+  if (!S.compras.length) return '<div id="resumo-cart" hidden></div>';
+  const cls = cart.resultado >= 0 ? 'var-alta' : 'var-baixa';
+  return `
+    <div id="resumo-cart" class="resumo-cart">
+      <div><small>Carteira hoje</small><span class="num">${R(cart.valorAtual)}</span></div>
+      <div><small>Investido</small><span class="num">${R(cart.investido)}</span></div>
+      <div><small>Resultado</small><span class="num ${cls}">${R(cart.resultado)} <small class="${cls}">${pct(cart.investido ? cart.resultado / cart.investido : null)}</small></span></div>
+      <div><small>Proventos</small><span class="num">${R(cart.proventos)}</span></div>
+    </div>`;
+}
+
+function adivinharTipo(cod) {
+  const c = cod.trim().toUpperCase();
+  if (/^TESOURO/.test(c)) return 'tesouro';
+  if (/^[A-Z]{4}(32|33|34|35|39)$/.test(c)) return 'bdr';
+  if (/^(BOVA|IVVB|SMAL|HASH|DIVO|NASD|XINA|GOLD|SPXI|ACWI|BOVV|PIBB|FIND|MATB)11$/.test(c)) return 'etf';
+  if (/^[A-Z]{4}11$/.test(c)) return 'fii';
+  return 'acao';
+}
+
 function renderComprar() {
   const mesAnt = mesAnterior(S.plano.mes);
   const auto = proventosAuto();
   const manual = S.plano.proventosManual != null;
   const semToken = !temCotacaoAutomatica();
+  const cart = posicoes();
+  // primeiro o que você já tem, depois o resto, na ordem da lista
+  const ordem = [...S.ativos].sort((x, y) => (cart.porTicker.get(y.ticker)?.qtd ? 1 : 0) - (cart.porTicker.get(x.ticker)?.qtd ? 1 : 0));
   return `
+    ${htmlResumoCarteira(cart)}
     <section class="bloco">
-      <div class="bloco-cab"><h2>Compra de ${nomeMesAno(S.plano.mes)}</h2></div>
       <div class="campos">
-        <label class="campo"><span>Aporte do mês</span>
+        <label class="campo"><span>Aporte de ${nomeMes(S.plano.mes)}</span>
           <input id="in-aporte" class="num" inputmode="decimal" value="${aporteMes().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}">
-          <span class="sub">Padrão: ${R(S.ajustes.aporteMensal)} · muda em Ajustes</span>
         </label>
         <label class="campo"><span>+ Proventos para reinvestir</span>
           <input id="in-proventos" class="num" inputmode="decimal" value="${proventosMes().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}">
@@ -187,24 +250,29 @@ function renderComprar() {
 
     <section class="bloco">
       <div class="bloco-cab">
-        <h2>Quanto comprar de cada</h2>
+        <h2>Meus ativos</h2>
         <div class="acoes">
           <button type="button" class="btn peq" id="btn-cotacoes" ${atualizando ? 'disabled' : ''}>${atualizando ? 'Atualizando…' : 'Atualizar cotações'}</button>
-          <button type="button" class="btn peq" id="btn-limpar">Zerar quantidades</button>
+          <button type="button" class="btn peq" id="btn-limpar">Zerar compra</button>
         </div>
       </div>
       ${N.nuvem.estado === 'local' ? `<p class="aviso"><b>Nuvem desligada:</b> ${esc(N.nuvem.mensagem)} Sem ela não há senha nem dados salvos na Cloudflare.</p>` : ''}
-      ${semToken ? `<p class="aviso"><b>Cotações automáticas:</b> sem token só a PETR4 atualiza. Crie um token grátis em <a href="https://brapi.dev/dashboard" target="_blank" rel="noopener">brapi.dev</a> e cole em <a href="#ajustes">Ajustes</a>. Enquanto isso, você pode digitar o preço tocando nele.</p>` : ''}
-      ${S.ativos.length ? `<div class="ordens">${S.ativos.map(htmlOrdem).join('')}</div>` : `<div class="vazio"><p>Nenhum ativo na sua lista.</p><a class="btn" href="#ajustes">Adicionar ativos</a></div>`}
+      ${semToken ? `<p class="aviso"><b>Preços:</b> sem a nuvem e sem token da brapi, só a PETR4 atualiza sozinha. Toque no preço para digitar.</p>` : ''}
+      ${ordem.length ? `<div class="ordens">${ordem.map((a) => htmlOrdem(a, cart.porTicker.get(a.ticker))).join('')}</div>` : `<p class="dica">Sua lista está vazia. Adicione o primeiro ativo aqui embaixo.</p>`}
+      <form id="form-add" class="add-ativo" autocomplete="off">
+        <input id="add-ticker" placeholder="Adicionar ativo: ITSA4, HGLG11, Tesouro IPCA+ 2035…" aria-label="Código do ativo para adicionar" required>
+        <select id="add-tipo" aria-label="Tipo do ativo">${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}">${v.nome}</option>`).join('')}</select>
+        <button class="btn prim" type="submit">+ Adicionar</button>
+      </form>
     </section>
 
     <section class="bloco">
       <div class="custos" id="custos"></div>
       <div class="comparar" id="comparar"></div>
       <div class="acoes">
-        <span class="dica">As compras você faz no app do banco. Depois, registre aqui para acompanhar a carteira.</span>
+        <span class="dica">Compre no app do banco e depois confirme aqui: as cotas entram na sua carteira.</span>
         <span class="esp"></span>
-        <button type="button" class="btn prim" id="btn-registrar">Registrar compras</button>
+        <button type="button" class="btn prim" id="btn-registrar">Comprei — registrar</button>
       </div>
     </section>`;
 }
@@ -229,6 +297,34 @@ function ligarComprar() {
   $('#btn-limpar').addEventListener('click', () => { S.plano.qtds = {}; persist('plano'); render(); });
   $('#btn-registrar').addEventListener('click', abrirRegistrar);
 
+  // adicionar ativo direto na tela
+  const addT = $('#add-ticker'), addTipo = $('#add-tipo');
+  addT.addEventListener('input', () => { if (!addTipo.dataset.manual) addTipo.value = adivinharTipo(addT.value); });
+  addTipo.addEventListener('change', () => { addTipo.dataset.manual = '1'; });
+  $('#form-add').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const tipo = addTipo.value;
+    let ticker = addT.value.trim();
+    if (tipo !== 'tesouro') ticker = ticker.toUpperCase().replace(/\s+/g, '');
+    if (!ticker) return;
+    const existente = S.ativos.find((a) => a.ticker.toLowerCase() === ticker.toLowerCase());
+    if (existente) { toast(`${ticker} já está na lista.`); $(`#q-${existente.id}`)?.focus(); return; }
+    const novo = { id: uid(), ticker, tipo, nome: tipo === 'tesouro' ? ticker : '', preco: null, precoEm: null, fonte: null };
+    S.ativos.push(novo);
+    persist('ativos');
+    render();
+    $(`#q-${novo.id}`)?.scrollIntoView({ block: 'center' });
+    toast(tipo === 'tesouro' ? `${ticker} adicionado. Digite o preço do site do Tesouro.` : `${ticker} adicionado.`);
+    if (tipo !== 'tesouro') {
+      buscarCotacao(ticker, S.ajustes.token).then((q) => {
+        novo.preco = q.preco; novo.precoEm = q.em; novo.fonte = q.fonte || 'brapi';
+        if (!novo.nome && q.nome) novo.nome = q.nome;
+        statusCotacao[novo.id] = { variacao: q.variacao };
+        persist('ativos'); pintarPrecos();
+      }).catch((err) => { statusCotacao[novo.id] = { erro: err.message }; pintarPrecos(); });
+    }
+  });
+
   const setQtd = (id, q, repintarInput = true) => {
     const a = S.ativos.find((x) => x.id === id);
     q = normalizaQtd(a, q);
@@ -251,13 +347,10 @@ function ligarComprar() {
       if (Number.isFinite(v) && v > 0) {
         a.preco = v; a.precoEm = new Date().toISOString(); a.fonte = 'manual';
         delete statusCotacao[a.id];
+        persist('ativos');
       }
-      persist('ativos');
-      const f = frescor(a);
-      const fr = e.target.parentElement.querySelector('.frescor');
-      fr.className = `frescor ${f.cls}`; fr.textContent = f.txt;
-      e.target.value = a.preco ? a.preco.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
-      pintarTotais();
+      e.target.blur();
+      pintarPrecos();
     }
   });
   main.addEventListener('click', (e) => {
@@ -272,13 +365,14 @@ function ligarComprar() {
     } else if (t.dataset.max) {
       const id = t.dataset.max;
       const a = S.ativos.find((x) => x.id === id);
-      if (!a.preco) { toast(`Informe o preço de ${a.ticker} primeiro.`); return; }
+      if (!a.preco) { toast(`Digite o preço de ${a.ticker} primeiro.`); $(`[data-preco="${id}"]`)?.focus(); return; }
       const rest = disponivel() - resumo(b).total;
       const q = qtdMaxima(a, Number(S.plano.qtds[id]) || 0, rest, b);
       setQtd(id, q);
       if (!q) toast(`Não sobra dinheiro para ${a.ticker}.`);
     }
   });
+  ligarRemover('data-del-ativo', 'ativos');
   pintarTotais();
 }
 
@@ -286,7 +380,7 @@ async function atualizarCotacoes() {
   if (atualizando) return;
   atualizando = true;
   ultimaBusca = Date.now();
-  if (location.hash.replace('#', '') === 'comprar' || !location.hash) render();
+  pintarPrecos();
   const { ok, erros, total } = await atualizarTodas(S.ativos, S.ajustes.token, (a, q, err) => {
     if (q) {
       a.preco = q.preco; a.precoEm = q.em; a.fonte = q.fonte || 'brapi';
@@ -298,10 +392,9 @@ async function atualizarCotacoes() {
   });
   atualizando = false;
   persist();
-  render();
-  if (!total) toast('Nenhum ativo de bolsa na lista.');
-  else if (!erros.length) toast(`${ok} cotações atualizadas.`);
-  else toast(`${ok} de ${total} atualizadas. ${erros.some((x) => x.msg === 'precisa de token') ? 'Falta o token da brapi em Ajustes.' : 'Veja os avisos na lista.'}`);
+  pintarPrecos();
+  if (!total) return;
+  if (erros.length) toast(`${ok} de ${total} cotações atualizadas. ${erros.some((x) => x.msg === 'precisa de token') ? 'Sem a nuvem, a brapi pede token.' : 'Veja os avisos na lista.'}`);
 }
 
 // ---------- registrar compras ----------
@@ -459,9 +552,10 @@ function ligarRemover(attr, colecao) {
     const b = e.target.closest(`[${attr}]`);
     if (!b) return;
     if (!b.classList.contains('confirmar')) {
+      const original = b.textContent;
       b.classList.add('confirmar');
-      b.textContent = 'confirmar?';
-      setTimeout(() => { if (b.isConnected) { b.classList.remove('confirmar'); b.textContent = 'remover'; } }, 3000);
+      b.textContent = colecao === 'ativos' ? 'tirar?' : 'confirmar?';
+      setTimeout(() => { if (b.isConnected) { b.classList.remove('confirmar'); b.textContent = original; } }, 3000);
       return;
     }
     const id = b.getAttribute(attr);
@@ -531,21 +625,8 @@ function ligarProventos() {
 // ---------- aba Ajustes ----------
 function renderAjustes() {
   const pctTxt = (f) => (Number(f || 0) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
-  const st = N.nuvem.estado;
-  const nuvemTxt = {
-    ok: 'Ligada. Ativos, compras, proventos e ajustes ficam salvos no seu banco D1 da Cloudflare e aparecem em qualquer aparelho.',
-    pendente: 'Ligada. Enviando as últimas alterações…',
-    offline: N.nuvem.mensagem || 'Sem conexão agora. As alterações serão enviadas quando a internet voltar.',
-    local: `Desligada: ${N.nuvem.mensagem || 'este endereço não tem o servidor da Cloudflare.'} Os dados ficam só neste navegador.`,
-    config: N.nuvem.mensagem || 'O servidor precisa de configuração.',
-    senha: 'Aguardando a senha.',
-    verificando: 'Verificando…',
-  }[st];
   return `
-    <section class="bloco">
-      <div class="bloco-cab"><h2>Nuvem</h2>${N.ativa() ? '<button type="button" class="btn peq" id="nv-sair">Sair neste aparelho</button>' : ''}</div>
-      <p class="dica">${esc(nuvemTxt)}</p>
-    </section>
+    <section class="bloco conta-bloco">${htmlConta()}</section>
 
     <section class="bloco">
       <h2>Aporte e cotações</h2>
@@ -553,27 +634,10 @@ function renderAjustes() {
         <label class="campo"><span>Aporte mensal padrão (R$)</span><input id="aj-aporte" class="num" inputmode="decimal" value="${Number(S.ajustes.aporteMensal).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"></label>
         <label class="campo" style="grid-column: span 2"><span>Token da brapi.dev</span><input id="aj-token" type="password" autocomplete="off" value="${esc(S.ajustes.token)}" placeholder="cole aqui o token gratuito"></label>
       </div>
-      <p class="dica">${N.ativa()
-        ? 'Com a nuvem ligada, as cotações vêm do Yahoo Finance (atraso de ~15 min, como em todo serviço gratuito da B3) e o token da brapi é só reserva, opcional.'
+      <p class="dica">${N.nuvem.servidor
+        ? 'Neste endereço, as cotações vêm do Yahoo Finance (atraso de ~15 min, como em todo serviço gratuito da B3) e o token da brapi é só reserva, opcional.'
         : 'Sem a nuvem, as cotações vêm direto da brapi: o token é grátis em <a href="https://brapi.dev/dashboard" target="_blank" rel="noopener">brapi.dev/dashboard</a> (atraso de ~30 min).'}
       Tesouro Direto não tem cotação automática: copie o preço de compra do <a href="https://www.tesourodireto.com.br/titulos/precos-e-taxas.htm" target="_blank" rel="noopener">site do Tesouro</a> e digite na aba Comprar.</p>
-    </section>
-
-    <section class="bloco">
-      <div class="bloco-cab"><h2>Meus ativos</h2><small>${S.ativos.length} na lista de compra</small></div>
-      <form id="form-ativo" class="campos">
-        <label class="campo"><span>Código</span><input id="at-ticker" placeholder="ex.: ITSA4 ou Tesouro IPCA+ 2035" required></label>
-        <label class="campo"><span>Tipo</span><select id="at-tipo">${Object.entries(TIPOS).map(([k, v]) => `<option value="${k}">${v.nome}</option>`).join('')}</select></label>
-        <label class="campo"><span>Nome (opcional)</span><input id="at-nome" placeholder="ex.: Itaúsa PN"></label>
-        <button class="btn prim" type="submit">Adicionar</button>
-      </form>
-      <div class="tabela-wrap"><table>
-        <thead><tr><th>Ativo</th><th>Tipo</th><th>Nome</th><th></th></tr></thead>
-        <tbody>${S.ativos.map((a, i) => `<tr>
-          <td><b>${esc(a.ticker)}</b></td><td><span class="chip ${a.tipo}">${esc(TIPOS[a.tipo]?.nome || a.tipo)}</span></td><td>${esc(a.nome || '')}</td>
-          <td class="r"><button type="button" class="x" data-subir="${i}" aria-label="Subir ${esc(a.ticker)}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" class="x" data-del-ativo="${a.id}">remover</button></td></tr>`).join('')}</tbody>
-      </table></div>
-      <p class="dica">Remover um ativo da lista não apaga as compras já registradas dele.</p>
     </section>
 
     <section class="bloco">
@@ -620,26 +684,6 @@ function ligarAjustes() {
     try { await buscarCotacao('BBAS3', S.ajustes.token); toast('Token funcionando.'); }
     catch (err) { toast(`Token salvo, mas a brapi respondeu: ${err.message}.`); }
   });
-  $('#form-ativo').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const tipo = $('#at-tipo').value;
-    let ticker = $('#at-ticker').value.trim();
-    if (tipo !== 'tesouro') ticker = ticker.toUpperCase().replace(/\s+/g, '');
-    if (!ticker) return;
-    if (S.ativos.some((a) => a.ticker.toLowerCase() === ticker.toLowerCase())) { toast(`${ticker} já está na lista.`); return; }
-    const novo = { id: uid(), ticker, tipo, nome: $('#at-nome').value.trim() || (tipo === 'tesouro' ? ticker : ''), preco: null, precoEm: null, fonte: null };
-    S.ativos.push(novo);
-    persist('ativos'); render(); toast(`${ticker} adicionado.`);
-    if (tipo !== 'tesouro') buscarCotacao(ticker, S.ajustes.token).then((q) => {
-      novo.preco = q.preco; novo.precoEm = q.em; novo.fonte = q.fonte || 'brapi'; if (!novo.nome && q.nome) novo.nome = q.nome; persist();
-      if (location.hash === '#ajustes') render();
-    }).catch(() => {});
-  });
-  $('#conteudo').addEventListener('click', (e) => {
-    const s = e.target.closest('[data-subir]');
-    if (s) { const i = Number(s.dataset.subir); [S.ativos[i - 1], S.ativos[i]] = [S.ativos[i], S.ativos[i - 1]]; persist('ativos'); render(); }
-  });
-  ligarRemover('data-del-ativo', 'ativos');
   $('#conteudo').addEventListener('change', (e) => {
     const id = e.target.dataset.bk;
     if (!id) return;
@@ -665,7 +709,7 @@ function ligarAjustes() {
     if (!apagar.dataset.ok) { apagar.dataset.ok = '1'; apagar.textContent = 'Tem certeza? Toque de novo'; setTimeout(() => { if (apagar.isConnected) { delete apagar.dataset.ok; apagar.textContent = 'Apagar tudo'; } }, 4000); return; }
     S = resetar(); persist(); N.substituirTudo(paraNuvem(S)); renderBancos(); render(); toast(N.ativa() ? 'Dados apagados aqui e na nuvem.' : 'Dados apagados.');
   });
-  $('#nv-sair')?.addEventListener('click', () => { N.sair(); render(); });
+  ligarConta($('.conta-bloco'));
 }
 
 // ---------- roteamento ----------
@@ -676,35 +720,108 @@ const ABAS = {
   ajustes: [renderAjustes, ligarAjustes],
 };
 
-// tela de senha e avisos da nuvem, mostrados acima de qualquer aba
-function htmlNuvemTopo() {
+// ---------- conta / nuvem ----------
+function quando(d) {
+  if (!d) return 'ainda não';
+  const min = Math.round((Date.now() - d) / 60000);
+  return min < 1 ? 'agora há pouco' : min < 60 ? `há ${min} min` : `às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+/** Conteúdo da conta: usado no painel do topo e em Ajustes. */
+function htmlConta() {
   const st = N.nuvem.estado;
+  if (N.ativa()) {
+    const sinc = st === 'pendente' ? 'salvando agora…' : st === 'offline' ? 'sem internet — as alterações serão enviadas quando voltar' : quando(N.nuvem.ultimaSinc);
+    return `
+      <div class="conta-cab"><span class="ponto ${st === 'offline' ? 'off' : st === 'pendente' ? 'pend' : 'ok'}"></span><h2>Conectado à sua nuvem</h2></div>
+      <dl class="conta-info">
+        <dt>Endereço</dt><dd>${esc(location.host)}</dd>
+        <dt>Onde ficam os dados</dt><dd>Banco D1 “meus-investimentos”, na sua conta Cloudflare</dd>
+        <dt>Salvo lá</dt><dd>${S.ativos.length} ativos · ${S.compras.length} compras · ${S.proventos.length} proventos</dd>
+        <dt>Última sincronização</dt><dd>${esc(sinc)}</dd>
+      </dl>
+      <p class="dica">O acesso é só seu, pela senha definida na Cloudflare. Abra este mesmo endereço no celular ou no computador e entre com ela para ver tudo igual.</p>
+      <div class="acoes"><button type="button" class="btn" data-conta="sinc">Sincronizar agora</button><span class="esp"></span><button type="button" class="btn perigo" data-conta="sair">Sair deste aparelho</button></div>`;
+  }
   if (st === 'senha') {
     return `
-      <section class="bloco entrar">
-        <h2>Entrar</h2>
-        <p class="dica">Digite a senha que você definiu na Cloudflare (variável SENHA) para carregar seus dados salvos na nuvem.</p>
-        <form id="form-senha" class="campos">
-          <label class="campo"><span>Senha</span><input type="password" id="nv-senha" autocomplete="current-password" required></label>
-          <button class="btn prim" type="submit">Entrar</button>
-        </form>
-        ${N.nuvem.mensagem ? `<p class="aviso"><b>${esc(N.nuvem.mensagem)}</b></p>` : ''}
-      </section>`;
+      <div class="conta-cab"><span class="ponto local"></span><h2>Entrar na sua nuvem</h2></div>
+      <p class="dica">Entrando, suas compras, proventos e ativos ficam salvos na Cloudflare e aparecem em qualquer aparelho. Sem entrar, o app funciona como calculadora: monte a compra normalmente, mas tudo fica só neste aparelho.</p>
+      <form class="campos" data-conta-form>
+        <label class="campo"><span>Senha</span><input type="password" id="nv-senha" autocomplete="current-password" required></label>
+        <button class="btn prim" type="submit">Entrar</button>
+      </form>
+      ${N.nuvem.mensagem ? `<p class="aviso"><b>${esc(N.nuvem.mensagem)}</b></p>` : ''}
+      <div class="acoes"><button type="button" class="btn" data-conta="fechar">Continuar sem entrar</button></div>`;
   }
-  if (st === 'config') return `<p class="aviso"><b>Nuvem não configurada:</b> ${esc(N.nuvem.mensagem)} Até lá, os dados ficam só neste navegador.</p>`;
+  if (st === 'config') {
+    return `
+      <div class="conta-cab"><span class="ponto off"></span><h2>Nuvem quase pronta</h2></div>
+      <p class="dica">${esc(N.nuvem.mensagem)} Enquanto isso, o app funciona como calculadora neste aparelho.</p>`;
+  }
+  return `
+    <div class="conta-cab"><span class="ponto local"></span><h2>Modo calculadora</h2></div>
+    <p class="dica">${st === 'verificando' ? 'Verificando a nuvem…' : `${esc(N.nuvem.mensagem || 'Este endereço não tem a nuvem.')} Tudo funciona, mas fica só neste aparelho.`}</p>`;
+}
+
+function ligarConta(raiz) {
+  if (!raiz) return;
+  raiz.addEventListener('submit', async (e) => {
+    if (!e.target.matches('[data-conta-form]')) return;
+    e.preventDefault();
+    const btn = e.target.querySelector('button');
+    btn.disabled = true; btn.textContent = 'Entrando…';
+    const srv = await N.entrar(e.target.querySelector('#nv-senha').value);
+    if (srv) { $('#dlg-conta').open && $('#dlg-conta').close(); toast('Conectado. Seus dados estão salvos na nuvem.'); }
+    aplicarNuvem(srv);
+  });
+  raiz.addEventListener('click', async (e) => {
+    const acao = e.target.closest('[data-conta]')?.dataset.conta;
+    if (acao === 'fechar') $('#dlg-conta').close();
+    if (acao === 'sinc') { const srv = await N.sincronizar(); if (srv) { aplicarNuvem(srv); toast('Sincronizado.'); } }
+    if (acao === 'sair') {
+      N.sair();
+      // ao sair, o aparelho guarda só a lista de ativos para continuar como calculadora
+      S.compras = []; S.proventos = []; salvar(S);
+      if ($('#dlg-conta').open) $('#dlg-conta').close();
+      render(); toast('Você saiu. Os dados continuam na nuvem.');
+    }
+  });
+}
+
+function abrirConta() {
+  const dlg = $('#dlg-conta');
+  dlg.innerHTML = `<div class="conta-dlg">${htmlConta()}<button type="button" class="x fechar" data-conta="fechar" aria-label="Fechar">✕</button></div>`;
+  dlg.showModal();
+  dlg.querySelector('#nv-senha')?.focus();
+}
+$('#nuvem').addEventListener('click', (e) => { e.preventDefault(); abrirConta(); });
+ligarConta($('#dlg-conta'));
+$('#dlg-conta').addEventListener('click', (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+
+// avisos de configuração, acima de qualquer aba
+function htmlNuvemTopo() {
+  if (N.nuvem.estado === 'config') return `<p class="aviso"><b>Nuvem quase pronta:</b> ${esc(N.nuvem.mensagem)}</p>`;
   return '';
 }
 
 function renderNuvem() {
   const el = $('#nuvem');
   const t = {
-    ok: ['Salvo na nuvem', 'ok'], pendente: ['Salvando…', 'pend'], offline: ['Sem conexão', 'off'],
-    local: ['Só neste aparelho', 'local'], config: ['Nuvem não configurada', 'off'], senha: ['Entrar', 'off'], verificando: ['', ''],
+    ok: ['Conectado', 'ok'], pendente: ['Salvando…', 'pend'], offline: ['Sem internet', 'off'],
+    local: ['Calculadora', 'local'], config: ['Configurar nuvem', 'off'], senha: ['Entrar', 'entrar'], verificando: ['', ''],
   }[N.nuvem.estado] || ['', ''];
   el.textContent = t[0];
   el.className = `nuvem-st ${t[1]}`;
   el.hidden = !t[0];
-  el.title = N.nuvem.mensagem || '';
+  el.title = N.ativa() ? `Conectado à nuvem em ${location.host}` : N.nuvem.mensagem || '';
+  // painel de conta aberto acompanha o estado
+  const dlg = $('#dlg-conta');
+  if (dlg.open && !dlg.contains(document.activeElement?.closest?.('form') || null)) {
+    dlg.querySelector('.conta-dlg').innerHTML = `${htmlConta()}<button type="button" class="x fechar" data-conta="fechar" aria-label="Fechar">✕</button>`;
+  }
+  const bloco = $('.conta-bloco');
+  if (bloco && !bloco.contains(document.activeElement)) bloco.innerHTML = htmlConta();
 }
 
 function render() {
@@ -717,23 +834,24 @@ function render() {
   const [html, ligar] = ABAS[aba];
   novo.innerHTML = htmlNuvemTopo() + html();
   ligar();
-  $('#form-senha')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector('button');
-    btn.disabled = true; btn.textContent = 'Entrando…';
-    aplicarNuvem(await N.entrar($('#nv-senha').value));
-  });
   renderBoleta();
   renderNuvem();
 }
 
 window.addEventListener('hashchange', () => { render(); window.scrollTo({ top: 0 }); });
-N.aoMudar(() => {
-  renderNuvem();
-  // a tela de senha aparece/some conforme o estado
-  const temEntrar = Boolean($('.entrar'));
-  if (temEntrar !== (N.nuvem.estado === 'senha')) render();
-});
+N.aoMudar(renderNuvem);
+
+/** Todo ativo que você tem em carteira aparece na lista, mesmo se foi tirado dela. */
+function garantirAtivosDaCarteira() {
+  const tem = new Set(S.ativos.map((a) => a.ticker));
+  let mudou = false;
+  for (const c of S.compras) {
+    if (tem.has(c.ticker)) continue;
+    S.ativos.push({ id: uid(), ticker: c.ticker, tipo: c.tipo || 'acao', nome: c.tipo === 'tesouro' ? c.ticker : '', preco: null, precoEm: null, fonte: null });
+    tem.add(c.ticker); mudou = true;
+  }
+  if (mudou) persist('ativos');
+}
 
 function aplicarNuvem(srv) {
   if (srv) {
@@ -747,6 +865,7 @@ function aplicarNuvem(srv) {
       renderBancos();
     }
   }
+  garantirAtivosDaCarteira();
   render();
   cotacoesAoAbrir();
 }

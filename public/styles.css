@@ -66,13 +66,17 @@ button, input, select { font: inherit; color: inherit; }
 .topo-in, .abas-in, .boleta-in, .conteudo { max-width: 960px; margin: 0 auto; padding-left: var(--gutter-l); padding-right: var(--gutter-r); }
 .topo-in { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-block: 12px; }
 .marca { display: inline-flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; font: 600 1.15rem var(--f-display); }
-.marca img { border-radius: 8px; display: block; }
+.marca img { border-radius: 8px; display: block; box-shadow: 0 0 0 1.5px rgb(255 255 255 / 40%); }
 .banco-sel { display: inline-flex; align-items: center; gap: 8px; font-size: 0.85rem; }
 .banco-sel select { background: rgb(255 255 255 / 14%); border: 1px solid rgb(255 255 255 / 35%); color: inherit; border-radius: 8px; padding: 6px 28px 6px 10px; }
 .banco-sel select option { color: #13201C; background: #fff; }
 @media (prefers-color-scheme: dark) { .banco-sel select { background: var(--folha-2); border-color: var(--linha); } .banco-sel select option { color: var(--tinta); background: var(--folha); } }
 
 .marca { margin-right: auto; }
+.nuvem-st { border: 0; cursor: pointer; font-family: inherit; line-height: 1.4; }
+.nuvem-st:hover { filter: brightness(1.1); }
+.nuvem-st.entrar { background: #F2C14E; color: #13201C; font-weight: 600; }
+.nuvem-st.entrar::before { background: #13201C; opacity: 0.5; }
 .nuvem-st { font-size: 0.78rem; font-weight: 500; padding: 4px 10px 4px 22px; border-radius: 99px; color: inherit; text-decoration: none; position: relative; background: rgb(255 255 255 / 12%); white-space: nowrap; }
 .nuvem-st::before { content: ""; position: absolute; left: 9px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: #9FE3C7; }
 .nuvem-st.pend::before { background: #F2D27A; }
@@ -141,7 +145,24 @@ button, input, select { font: inherit; color: inherit; }
 
 /* ---------- ordens (lista de compra) ---------- */
 .ordens { display: grid; }
-.ordem { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) auto minmax(0, 1fr); gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--linha); }
+.ordem { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 0.9fr) auto minmax(0, 0.9fr) 28px; grid-template-areas: "a p q t x"; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--linha); }
+.ordem .x-del { grid-area: x; justify-self: end; font-size: 0.85rem; }
+.ordem .x-del.confirmar { font-size: 0.75rem; white-space: nowrap; }
+.ordem-ativo .pos { font-size: 0.82rem; color: var(--tinta-2); white-space: normal; overflow: visible; }
+.ordem-ativo .pos b { color: var(--tinta); font-weight: 600; }
+.ordem-ativo .pos.nada { color: var(--tinta-3); }
+.linha1 .nome { min-width: 0; flex: 1 1 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--tinta-3); }
+.apagado { color: var(--tinta-3); }
+.add-ativo { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 12px; border-top: 1px dashed var(--linha); }
+.add-ativo input { flex: 1 1 220px; min-width: 0; background: var(--folha-2); border: 1px solid var(--linha); border-radius: 8px; padding: 9px 12px; }
+.add-ativo select { background: var(--folha-2); border: 1px solid var(--linha); border-radius: 8px; padding: 9px 10px; }
+.add-ativo input:focus, .add-ativo select:focus { border-color: var(--acento); outline: none; box-shadow: 0 0 0 3px var(--acento-suave); }
+.resumo-cart { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; background: var(--folha); border: 1px solid var(--linha); border-radius: var(--raio); padding: 12px 16px; }
+.resumo-cart > div { min-width: 0; }
+.resumo-cart small { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.resumo-cart .num { font-size: 1.05rem; font-weight: 500; white-space: nowrap; }
+.resumo-cart .num small { display: inline; font-size: 0.78rem; text-transform: none; letter-spacing: 0; }
+@media (max-width: 640px) { .resumo-cart { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .ordem:first-child { border-top: 0; }
 .ordem.tem-qtd .tk { color: var(--acento); }
 .ordem-ativo { min-width: 0; display: grid; gap: 2px; }
@@ -171,11 +192,10 @@ button, input, select { font: inherit; color: inherit; }
 .ordem-total .num { font-weight: 500; }
 .ordem-total small { font-size: 0.75rem; }
 .ordem-total .warn { color: var(--alerta); }
+.ordem-ativo { grid-area: a; } .ordem-preco { grid-area: p; } .ordem-qtd { grid-area: q; } .ordem-total { grid-area: t; }
 @media (max-width: 640px) {
-  .ordem { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "a p" "q t"; row-gap: 8px; }
-  .ordem-ativo { grid-area: a; } .ordem-preco { grid-area: p; text-align: right; justify-items: end; }
-  .ordem-qtd { grid-area: q; } .ordem-total { grid-area: t; }
-  .preco-input { text-align: right; margin-left: 0; margin-right: -6px; }
+  .ordem { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "a x" "p t" "q q"; row-gap: 8px; }
+  .ordem-total { align-self: start; }
 }
 
 /* resumo de custos */
@@ -240,3 +260,18 @@ tfoot td { font-weight: 600; border-top: 1px solid var(--linha); }
 .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--tinta); color: var(--papel); padding: 10px 16px; border-radius: 10px; font-size: 0.9rem; z-index: 20; box-shadow: var(--sombra); max-width: calc(100vw - 32px); }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* painel da conta */
+.conta-dlg { position: relative; display: grid; gap: 14px; padding: 20px; }
+.conta-dlg .fechar { position: absolute; top: 10px; right: 10px; font-size: 0.9rem; }
+.conta-bloco { gap: 12px; }
+.conta-cab { display: flex; align-items: center; gap: 10px; padding-right: 28px; }
+.ponto { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--tinta-3); }
+.ponto.ok { background: var(--alta); box-shadow: 0 0 0 4px var(--acento-suave); }
+.ponto.pend { background: var(--alerta); }
+.ponto.off { background: var(--baixa); }
+.conta-info { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 0.9rem; }
+.conta-info dt { color: var(--tinta-2); }
+.conta-info dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) { .conta-info { grid-template-columns: minmax(0, 1fr); } .conta-info dd { margin-bottom: 6px; } }
+.conta-dlg form, .conta-bloco form { padding: 0; }

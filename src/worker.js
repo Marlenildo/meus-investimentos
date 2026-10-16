@@ -2,7 +2,7 @@
 // - Serve o site (pasta public/) e a API em /api/*.
 // - Guarda ativos, compras, proventos e ajustes no D1 (binding DB).
 // - Busca cotações no Yahoo Finance (atraso de ~15 min na B3), com a brapi como reserva.
-// - Toda a API (menos /api/saude) exige a senha definida na variável SENHA.
+// - Os dados exigem a senha definida na variável SENHA; /api/saude e /api/cotacoes são públicos.
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS config (chave TEXT PRIMARY KEY, valor TEXT NOT NULL, atualizado_em TEXT)`,
@@ -194,15 +194,16 @@ async function api(req, env, url) {
   if (caminho === 'saude') {
     return json({ app: 'meus-investimentos', banco: Boolean(env.DB), senhaDefinida: Boolean(env.SENHA) });
   }
-  const negado = await conferirSenha(req, env);
-  if (negado) return negado;
-
+  // cotações são públicas: o app funciona como calculadora mesmo sem entrar
   if (caminho === 'cotacoes' && metodo === 'GET') {
     const tickers = [...new Set((url.searchParams.get('t') || '').split(',').map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z0-9]{4,12}$/.test(s)))].slice(0, 40);
     if (!tickers.length) return erro(400, 'Informe os códigos em ?t=BBAS3,PETR4');
     const token = req.headers.get('X-Brapi-Token') || env.BRAPI_TOKEN || '';
     return json(await cotacoes(tickers, token));
   }
+
+  const negado = await conferirSenha(req, env);
+  if (negado) return negado;
 
   if (!env.DB) return erro(503, 'O banco D1 não está ligado ao Worker (binding DB).');
   const db = env.DB;

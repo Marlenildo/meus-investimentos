@@ -16,7 +16,7 @@ const ouvintes = new Set();
 
 // estado: 'verificando' | 'local' (sem Worker) | 'senha' (pedir senha) | 'config' (Worker sem SENHA/DB)
 //         | 'ok' (tudo salvo) | 'pendente' (enviando) | 'offline' (vai tentar de novo)
-export const nuvem = { estado: 'verificando', mensagem: '' };
+export const nuvem = { estado: 'verificando', mensagem: '', ultimaSinc: null, servidor: false };
 
 function mudar(estado, mensagem = '') {
   nuvem.estado = estado;
@@ -55,7 +55,8 @@ export async function iniciar() {
     const r = await fetch('/api/saude', { headers: { Accept: 'application/json' }, cache: 'no-store' });
     const tipo = r.headers.get('content-type') || '?';
     const j = await r.json().catch(() => null);
-    if (!r.ok || j?.app !== 'meus-investimentos') {
+    nuvem.servidor = r.ok && j?.app === 'meus-investimentos';
+    if (!nuvem.servidor) {
       const onde = location.hostname.endsWith('.pages.dev')
         ? 'Este endereço é do Cloudflare Pages, que só publica o site. A nuvem precisa ser criada como Worker.'
         : location.hostname.endsWith('github.io')
@@ -78,6 +79,7 @@ async function carregarServidor() {
   try {
     await esvaziarFila();
     const estado = await req('GET', 'estado');
+    nuvem.ultimaSinc = new Date();
     mudar(fila.length ? 'pendente' : 'ok');
     return estado;
   } catch (e) {
@@ -104,9 +106,15 @@ export async function entrar(nova) {
 
 export function sair() {
   senha = '';
+  fila = [];
   gravar(SENHA_KEY, '');
+  gravar(FILA_KEY, []);
+  nuvem.ultimaSinc = null;
   mudar('senha');
 }
+
+/** Busca de novo tudo o que está na nuvem. */
+export const sincronizar = () => carregarServidor();
 
 // ---------- fila de escritas ----------
 // Itens com a mesma "chave" se substituem (ex.: o plano muda a cada toque no +; só o último importa).
@@ -146,6 +154,7 @@ async function esvaziarFila() {
       fila.shift();
       gravar(FILA_KEY, fila);
     }
+    nuvem.ultimaSinc = new Date();
     mudar('ok');
   } finally {
     enviando = false;

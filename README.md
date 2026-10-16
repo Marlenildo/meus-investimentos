@@ -8,8 +8,8 @@ Roda na Cloudflare (grátis): o site, uma API e um banco de dados D1 onde ficam 
 
 ## O que tem
 
-- **Comprar** — aporte do mês + proventos do mês anterior = disponível. Lista dos seus ativos com preço atual, botões − / + para as cotas, botão **MÁX** que enche com o que falta, total por ativo e barra mostrando quanto falta (ou quanto passou). Mostra o custo da compra no banco escolhido e compara com os outros bancos. As cotações se atualizam sozinhas a cada 5 minutos com a tela aberta.
-- **Carteira** — cotas, preço médio, investido, valor hoje, resultado e proventos por ativo; gráfico de aportes por mês; histórico de compras.
+- **Comprar (tela inicial)** — resumo da carteira; aporte do mês + proventos do mês anterior = disponível. Cada ativo mostra quanto você já tem (cotas, preço médio, valor e resultado), o preço atual e os botões − / + / **MÁX** para montar a compra, com o total ao lado. Adicione ou tire ativos ali mesmo. Depois de comprar no banco, **Comprei — registrar** e as cotas entram na carteira. Cotações se atualizam sozinhas a cada 5 minutos.
+- **Histórico** — totais, posição por ativo, gráfico de aportes por mês e lista de compras.
 - **Proventos** — lança dividendos, JCP, rendimentos de FII e juros. O total do mês anterior entra sozinho no aporte.
 - **Ajustes** — aporte padrão, lista de ativos, custos por banco, backup e status da nuvem.
 
@@ -23,7 +23,7 @@ Roda na Cloudflare (grátis): o site, uma API e um banco de dados D1 onde ficam 
 
    Clique em **Deploy**. No primeiro deploy a Cloudflare cria sozinha o banco D1 `meus-investimentos`.
 3. **Defina sua senha:** abra o Worker → **Settings → Variables and Secrets → Add**. Tipo **Secret**, nome `SENHA`, valor = a senha que você quer usar no app. Salve.
-4. **Abra o app** no endereço que aparece no painel (algo como `https://meus-investimentos.SEU-USUARIO.workers.dev`), digite a senha e pronto. No celular, use "Adicionar à tela inicial".
+4. **Abra o app** no endereço que aparece no painel (algo como `https://meus-investimentos.SEU-USUARIO.workers.dev`). Ele já funciona como calculadora sem entrar. Toque em **Entrar** no topo e use a senha para salvar tudo na nuvem; o botão vira **Conectado** e mostra onde os dados estão. No celular, use "Adicionar à tela inicial".
 
 Daí em diante, cada mudança enviada para a branch `main` publica sozinha.
 
@@ -48,7 +48,8 @@ Tesouro Direto não tem cotação automática: copie o preço de compra do [site
 ## Dados e segurança
 
 - Ficam no seu banco D1, na sua conta Cloudflare. Plano grátis: 5 GB e 100 mil gravações por dia — sobra muito.
-- A API só responde com a senha (`SENHA`). Use uma senha forte: o endereço `workers.dev` é público.
+- Os dados só saem com a senha (`SENHA`); só as cotações são públicas. Use uma senha forte: o endereço `workers.dev` é público.
+- Sem entrar, o app é uma calculadora: tudo fica só no aparelho. Ao sair, o aparelho esquece compras e proventos (eles continuam na nuvem).
 - O navegador guarda uma cópia para abrir rápido e funcionar sem internet; as alterações feitas offline são enviadas quando a conexão volta.
 - **Ajustes → Exportar backup** gera um arquivo JSON com tudo. **Importar** substitui tudo, aqui e na nuvem.
 - Aberto sem o Worker (por exemplo, `index.html` direto), o app funciona só no navegador.

@@ -23,7 +23,7 @@
         <img src="icone.svg" width="30" height="30" alt="">
         <span>Meus Investimentos</span>
       </a>
-      <a href="#ajustes" id="nuvem" class="nuvem-st" hidden></a>
+      <button type="button" id="nuvem" class="nuvem-st" hidden></button>
       <label class="banco-sel">
         <span>Comprando pelo</span>
         <select id="banco"></select>
@@ -36,7 +36,7 @@
   <nav class="abas" aria-label="Seções">
     <div class="abas-in">
       <a href="#comprar" data-aba="comprar">Comprar</a>
-      <a href="#carteira" data-aba="carteira">Carteira</a>
+      <a href="#carteira" data-aba="carteira">Histórico</a>
       <a href="#proventos" data-aba="proventos">Proventos</a>
       <a href="#ajustes" data-aba="ajustes">Ajustes</a>
     </div>
@@ -45,6 +45,7 @@
   <main id="conteudo" class="conteudo"></main>
 
   <dialog id="dlg-registrar" class="dlg"></dialog>
+  <dialog id="dlg-conta" class="dlg" aria-label="Sua conta"></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
 
   <script type="module" src="js/app.js"></script>

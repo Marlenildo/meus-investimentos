@@ -752,8 +752,11 @@ function htmlGrafico(largura) {
     const mk = empilhaTudo ? mercPorTipo[i] : null;
     const out = [];
     if (simples) {
-      const investido = inv(l);
-      if (investido > 0.005 || (merc[i] || 0) > 0.005) out.push({ k: 'total', cls: 's-investido', nome: 'Investido', investido, vale: empilhaTudo ? merc[i] : null });
+      // como no começo: só o investido de cada classe (Tesouro num bloco só), sem valorização
+      for (const k of pilha) {
+        const investido = (l[k] || 0) + (comTaxa ? l.tx?.[k] || 0 : 0);
+        if (investido > 0.005) out.push({ k, cls: `s-${k}`, nome: nomeSerie(k), investido, vale: null });
+      }
       return out;
     }
     for (const k of pilha) {
@@ -774,7 +777,7 @@ function htmlGrafico(largura) {
   const blocos = linhas.map((l, i) => blocosDe(l, i));
   // altura: cada bloco ocupa o maior entre investido e valor (a perda fica marcada dentro dele)
   const altura = blocos.map((bs) => bs.reduce((s2, b) => s2 + Math.max(b.investido, b.vale ?? 0), 0));
-  const maxV = Math.max(1, ...linhas.map((l, i) => Math.max(altura[i], comProv ? l.proventos : 0)));
+  const maxV = Math.max(1, ...linhas.map((l, i) => Math.max(altura[i], comProv ? l.proventos : 0, merc[i] || 0)));
   const y = (v) => topo + alt * (1 - v / maxV);
   const duas = pilha.length && comProv;
   const wInv = Math.min(58, Math.max(18, slot * (duas ? 0.46 : 0.5)));
@@ -791,7 +794,7 @@ function htmlGrafico(largura) {
     const xProv = duas ? xInv + wInv + 3 : cx - wProv / 2;
     const etiqueta = (x, w, vTopo, vBase, texto, cls) => {
       const yT = y(vTopo), yB = y(vBase);
-      if (w < 30 || yB - yT < 12) return '';
+      if (simples || w < 30 || yB - yT < 12) return '';
       return `<text class="seg-rot ${cls}" x="${x + w / 2}" y="${(yT + yB) / 2 + 3.5}" text-anchor="middle">${texto}</text>`;
     };
     let acc = 0, segs = '', rotSeg = '';
@@ -834,7 +837,7 @@ function htmlGrafico(largura) {
       prov = `<clipPath id="cp${i}"><rect x="${xProv}" y="${yp}" width="${wProv}" height="${yBase - yp + 6}" rx="4"/></clipPath><g clip-path="url(#cp${i})">${prov}</g>`;
       if (duas && slot >= 60) rotSeg += `<text class="seg-rot seg-provtot" x="${xProv + wProv / 2}" y="${yp - 4}" text-anchor="middle">${curto(l.proventos)}</text>`;
     }
-    const topoBarra = Math.min(acc ? yTopo : H, comProv && l.proventos ? y(l.proventos) - 12 : H);
+    const topoBarra = Math.min(acc ? yTopo : H, comProv && l.proventos ? y(l.proventos) - 12 : H, merc[i] != null ? y(merc[i]) - 7 : H);
     const [tx, anc] = slot >= 112 ? [cx, 'middle'] : i === 0 ? [i * slot + 4, 'start'] : i === n - 1 ? [(i + 1) * slot - 4, 'end'] : [cx, 'middle'];
     let rot = '';
     if (merc[i] != null && acc) {
@@ -857,8 +860,8 @@ function htmlGrafico(largura) {
   const linhaMerc = comMerc && HIST && pts.some(Boolean) ? `<polyline class="linha-merc" points="${pts.filter(Boolean).map((p2) => p2.join(',')).join(' ')}"/>${pts.map((p2, i) => (p2 ? `<circle class="ponto-merc ${i === sel ? 'sel' : ''}" cx="${p2[0]}" cy="${p2[1]}" r="${i === sel ? 5 : 3}"/>` : '')).join('')}` : '';
 
   const l = linhas[sel];
-  const itens = !l ? [] : simples && !acum ? (comProv && l.proventos ? [['Proventos', l.proventos, 's-prov', null]] : []) : simples ? [
-    ...blocos[sel].map((b) => [b.nome, b.investido, b.cls, b.vale]),
+  const itens = !l ? [] : simples ? [
+    ...blocos[sel].map((b) => [b.nome, b.investido, b.cls, null]),
     ...(comProv && l.proventos ? [['Proventos', l.proventos, 's-prov', null]] : []),
   ] : [
     ...blocos[sel].map((b) => [b.nome, b.investido, b.cls, b.vale]),
@@ -927,7 +930,7 @@ function htmlGrafico(largura) {
         </div>
       </div>
       <div class="filtros" role="group" aria-label="Mostrar no gráfico">
-        ${presentes.filter((x) => !simples || ['prov', 'mercado', 'taxa'].includes(x.k)).map((x) => `<button type="button" class="filtro" data-graf-serie="${x.k}" aria-pressed="${ativos.has(x.k)}"><i class="sw s-${x.k}"></i>${x.nome}</button>`).join('')}
+        ${presentes.map((x) => `<button type="button" class="filtro" data-graf-serie="${x.k}" aria-pressed="${ativos.has(x.k)}"><i class="sw s-${x.k}${simples && x.k === 'mercado' ? ' linha' : ''}"></i>${simples && x.k === 'mercado' ? 'Valor de mercado' : x.nome}</button>`).join('')}
       </div>
       ${n ? `<div class="graf-rolagem" data-largura="${L}"><svg class="grafico" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Investimentos${comProv ? ' e proventos' : ''} por ${per === 'mes' ? 'mês' : per}${acum ? ', acumulado' : ''}">
         <defs>
@@ -935,7 +938,7 @@ function htmlGrafico(largura) {
           <pattern id="hach-perda" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hach-fundo-baixa" width="6" height="6"/><line class="hach-linha-baixa" x1="0" y1="0" x2="0" y2="6"/></pattern>
         </defs>
         ${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}${linhaMerc}</svg></div>
-      ${empilhaTudo ? `<div class="graf-legenda"><span><i class="sw s-valoriz"></i>valorização</span><span><i class="sw s-perda-sw"></i>desvalorização</span>${comProv ? '<span><i class="sw pv-dividendo"></i>proventos (barra ao lado)</span>' : ''}</div>` : ''}
+      ${empilhaTudo && !simples ? `<div class="graf-legenda"><span><i class="sw s-valoriz"></i>valorização</span><span><i class="sw s-perda-sw"></i>desvalorização</span>${comProv ? '<span><i class="sw pv-dividendo"></i>proventos (barra ao lado)</span>' : ''}</div>` : ''}
       <div class="graf-detalhe">${detalhe}</div>` : '<p class="dica">Ainda não há compras nem proventos para mostrar.</p>'}
     </section>`;
 }

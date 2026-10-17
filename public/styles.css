@@ -747,3 +747,6 @@ html, body { overflow-x: clip; }
 .grafico text.v, .grafico text.v2 { paint-order: stroke; stroke: var(--folha); stroke-width: 4px; stroke-linejoin: round; }
 .grafico .slot.sel text.v, .grafico .slot.sel text.v2 { stroke: color-mix(in srgb, var(--violeta) 10%, var(--folha)); }
 .grafico .linha-merc { stroke-width: 1.75px; opacity: 0.85; }
+/* no simples, o filtro da linha mostra a linha (não a hachura) */
+.filtros .sw.s-mercado.linha { width: 14px; height: 10px; border-radius: 0; box-shadow: none; background: linear-gradient(var(--tinta), var(--tinta)) center / 100% 2px no-repeat; }
+.filtros .filtro[aria-pressed="false"] .sw.s-mercado.linha { background: linear-gradient(var(--tinta-3), var(--tinta-3)) center / 100% 2px no-repeat; }

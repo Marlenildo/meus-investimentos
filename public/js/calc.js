@@ -216,7 +216,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
   const chave = CHAVE_PERIODO[periodo] || CHAVE_PERIODO.mes;
   const m = new Map();
   const linha = (k) => {
-    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 } });
+    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 }, pv: {} });
     return m.get(k);
   };
   const vendas = processarOperacoes(compras);
@@ -240,7 +240,12 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
     l.total += v;
     l.compras++;
   }
-  for (const p of proventos) linha(chave(p.data)).proventos += Number(p.valor || 0);
+  for (const p of proventos) {
+    const l = linha(chave(p.data));
+    const t = TIPOS_PROVENTO[p.tipo] ? p.tipo : 'outro';
+    l.proventos += Number(p.valor || 0);
+    l.pv[t] = (l.pv[t] || 0) + Number(p.valor || 0); // por tipo, para empilhar no gráfico
+  }
   let acum = 0;
   return [...m.values()]
     .sort((a, b) => a.chave.localeCompare(b.chave))
@@ -251,6 +256,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
         acao: round2(l.acao), fii: round2(l.fii), tesouro: round2(l.tesouro), outros: round2(l.outros),
         total: round2(l.total), proventos: round2(l.proventos), acumulado: round2(acum),
         tx: Object.fromEntries(Object.entries(l.tx).map(([k, v]) => [k, round2(v)])),
+        pv: Object.fromEntries(Object.entries(l.pv).map(([k, v]) => [k, round2(v)])),
       };
     });
 }

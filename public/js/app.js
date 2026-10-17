@@ -5,6 +5,7 @@ import {
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
 import * as N from './nuvem.js';
+import './seletores.js';
 
 // ---------- estado ----------
 let S = carregar();

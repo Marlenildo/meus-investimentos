@@ -703,3 +703,26 @@ html, body { overflow-x: clip; }
 .conta-ret small { font-size: 0.7rem; color: var(--tinta-3); }
 .grafico .seg-perda { fill: #fff; paint-order: stroke; stroke: var(--baixa); stroke-width: 2.5px; }
 .grafico .seg-provtot { fill: var(--pv-div); font-size: 8.5px; }
+
+/* proventos: card do total e grupos por classe na lista por ativo */
+.pv-tipo-total { background: var(--acento-suave); }
+.pv-tipo-total span { color: var(--tinta); font-weight: 700; }
+.pv-total-sw { background: linear-gradient(135deg, var(--pv-div), var(--pv-rend)); }
+.pv-grupo { display: grid; gap: 12px; }
+.pv-grupo + .pv-grupo { margin-top: 6px; }
+.pv-grupo-cab { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: baseline; padding-bottom: 6px; border-bottom: 1px solid var(--linha); }
+.pv-grupo-cab span { display: inline-flex; align-items: center; gap: 8px; font: 700 0.95rem var(--f-display); }
+.pv-grupo-cab b { font: 700 1rem var(--f-display); }
+.pv-grupo-cab small { color: var(--tinta-3); font-weight: 600; font-size: 0.78rem; }
+.pv-tipo-total { grid-column: 1 / -1; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto; }
+.pv-tipo-total b { grid-column: 3; grid-row: 1; font-size: 1.15rem; }
+.pv-tipo-total small { grid-column: 2; grid-row: 1; justify-self: start; font-weight: 500; }
+.pv-tipo-total span { grid-column: 2; grid-row: 1; margin-right: 8px; }
+.pv-tipo-total { display: flex; align-items: center; gap: 8px; }
+.pv-tipo-total span { flex: none; }
+.pv-tipo-total small { flex: 1; }
+.pv-tipo span { white-space: normal; overflow: visible; line-height: 1.25; }
+.pv-tipo:not(.pv-tipo-total) span { grid-column: 2 / -1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-tipo-total small { text-align: right; }
+.pv-tipo-total b { order: 3; }
+.pv-tipo-total small { order: 2; }

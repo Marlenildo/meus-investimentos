@@ -552,6 +552,7 @@ function abrirRegistrar() {
 
 // ---------- aba Carteira ----------
 // ---------- um gráfico só: investido por tipo + proventos, por dia, mês ou ano ----------
+const NOME_CURTO_PROV = { rendimento: 'Rendimentos', atualizacao: 'Correção', fracao: 'Frações', resgate: 'Resgate' };
 const NOME_CLASSE = { acao: 'de ações', fii: 'de FIIs', tesouro: 'do Tesouro', outros: 'de outros' };
 const TIPOS_PROV_ORDEM = ['dividendo', 'jcp', 'rendimento', 'juros', 'atualizacao', 'fracao', 'resgate', 'outro'];
 const SERIES = [
@@ -1310,7 +1311,8 @@ function htmlResumoProventos() {
 
       ${barraTipos(por, total)}
       <div class="pv-tipos">
-        ${tipos.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span>${esc(TIPOS_PROVENTO[k].replace(' (FII)', ''))}</span><b class="num">${R(por[k])}</b><small>${pctDe(por[k])}</small></div>`).join('')}
+        <div class="pv-tipo pv-tipo-total"><i class="sw pv-total-sw"></i><span>Total</span><b class="num">${R(total)}</b><small>${xs.length} ${xs.length === 1 ? 'pagamento' : 'pagamentos'}</small></div>
+        ${tipos.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span title="${esc(TIPOS_PROVENTO[k])}">${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])}</span><b class="num">${R(por[k])}</b><small>${pctDe(por[k])}</small></div>`).join('')}
       </div>
       ${semTipo.length ? `<p class="aviso pv-aviso"><b>${R(semTipo.reduce((s, p) => s + Number(p.valor), 0))}</b> vieram da planilha antiga só com o total do mês, sem ativo nem tipo. Com o informe de rendimentos do banco dá para separar.</p>` : ''}
 
@@ -1338,11 +1340,25 @@ function htmlResumoProventos() {
 
       <div class="pv-ativos">
         <h3>Por ativo</h3>
-        ${ativos.map(([t, a]) => `<div class="pv-ativo">
-          <div class="cc-linha"><b>${esc(t)}</b><span class="num">${R(a.total)}</span></div>
-          <div class="pv-mini" style="width:${Math.max(4, (a.total / maior) * 100)}%">${barraTipos(a.tipos, a.total)}</div>
-          <small>${TIPOS_PROV_ORDEM.filter((k) => a.tipos[k] > 0).map((k) => `${esc(TIPOS_PROVENTO[k])} ${R(a.tipos[k])}`).join(' · ')}</small>
-        </div>`).join('')}
+        ${(() => {
+          // agrupa por classe: ações, fundos imobiliários…
+          const classe = classesPorTicker(S.compras);
+          const nomes = { acao: 'Ações', fii: 'Fundos imobiliários', tesouro: 'Tesouro', outros: 'Outros' };
+          const grupos = ['acao', 'fii', 'tesouro', 'outros']
+            .map((k) => [k, ativos.filter(([t]) => (classe.get(t) || 'outros') === k)])
+            .filter(([, xs2]) => xs2.length);
+          return grupos.map(([k, xs2]) => {
+            const sub = xs2.reduce((s2, [, a]) => s2 + a.total, 0);
+            return `<div class="pv-grupo">
+              <div class="pv-grupo-cab"><span><i class="sw s-${k}"></i>${nomes[k]}</span><b class="num">${R(sub)}</b><small>${pctDe(sub)}</small></div>
+              ${xs2.map(([t, a]) => `<div class="pv-ativo">
+                <div class="cc-linha"><b>${esc(t)}</b><span class="num">${R(a.total)}</span></div>
+                <div class="pv-mini" style="width:${Math.max(4, (a.total / maior) * 100)}%">${barraTipos(a.tipos, a.total)}</div>
+                <small>${TIPOS_PROV_ORDEM.filter((k2) => a.tipos[k2] > 0).map((k2) => `${esc(TIPOS_PROVENTO[k2].replace(' (FII)', ''))} ${R(a.tipos[k2])}`).join(' · ')}</small>
+              </div>`).join('')}
+            </div>`;
+          }).join('');
+        })()}
       </div>
     </section>`;
 }

@@ -350,3 +350,103 @@ export function precoTesouroEm(ym, precoHoje, hojeYm) {
   }
   return precoHoje / fator;
 }
+
+// ---------- quanto sobraria se vendesse tudo hoje (impostos e taxas estimados) ----------
+const IOF_TABELA = [96, 93, 90, 86, 83, 80, 76, 73, 70, 66, 63, 60, 56, 53, 50, 46, 43, 40, 36, 33, 30, 26, 23, 20, 16, 13, 10, 6, 3]; // % do rendimento, do 1º ao 29º dia
+/** Alíquota de IR da renda fixa (Tesouro) pela quantidade de dias aplicados. */
+export const aliquotaRendaFixa = (dias) => (dias <= 180 ? 0.225 : dias <= 360 ? 0.2 : dias <= 720 ? 0.175 : 0.15);
+const diasEntre = (a, b) => Math.max(0, Math.round((Date.parse(`${b}T12:00:00`) - Date.parse(`${a}T12:00:00`)) / 86400000));
+
+/**
+ * Estimativa do que sobraria vendendo tudo hoje, pelas regras da pessoa física:
+ * - Tesouro: IR regressivo sobre o rendimento de cada compra (e IOF antes de 30 dias);
+ * - Ações: 15% do lucro, isento se as vendas de ações no mês somarem até R$ 20 mil;
+ * - FIIs: 20% do lucro, sem isenção; ETF/BDR: 15%, sem isenção;
+ * - bolsa: 0,03% de taxas da B3 na venda.
+ * Prejuízo de uma classe compensa lucro da mesma classe. Proventos já chegam líquidos.
+ */
+export function liquidoSeVender(compras, ativos, hoje) {
+  const preco = (t) => Number(ativos.find((a) => a.ticker === t)?.preco) || 0;
+  const vendas = processarOperacoes(compras);
+  const lotes = new Map(); // tesouro: compras ainda em carteira (primeira que entra, primeira que sai)
+  const pos = new Map(); // bolsa: quantidade e custo pelo preço médio
+  for (const c of ordemCron(compras)) {
+    const lado = ladoDe(c);
+    const q = Number(c.qtd) || 0;
+    if (c.tipo === 'tesouro') {
+      const ls = lotes.get(c.ticker) || [];
+      if (lado === 'C') ls.push({ data: c.data, qtd: q, preco: Number(c.preco), custo: Number(c.custo || 0) });
+      else if (lado === 'V') {
+        let falta = q;
+        while (falta > 1e-9 && ls.length) {
+          const l = ls[0];
+          const usa = Math.min(falta, l.qtd);
+          l.custo *= (l.qtd - usa) / l.qtd;
+          l.qtd -= usa; falta -= usa;
+          if (l.qtd <= 1e-9) ls.shift();
+        }
+      }
+      lotes.set(c.ticker, ls);
+      continue;
+    }
+    const p = pos.get(c.ticker) || { tipo: c.tipo, qtd: 0, custo: 0 };
+    if (lado === 'C') { p.qtd += q; p.custo += q * Number(c.preco) + Number(c.custo || 0); }
+    else if (lado === 'B' || lado === 'A') p.qtd = Math.max(0, p.qtd + q);
+    else { const base = vendas.get(c.id)?.custoBase || 0; p.qtd = Math.max(0, p.qtd - q); p.custo = p.qtd > 1e-9 ? p.custo - base : 0; }
+    pos.set(c.ticker, p);
+  }
+  const vazio = () => ({ bruto: 0, custo: 0, lucro: 0, ir: 0, iof: 0, taxas: 0, liquido: 0 });
+  const porTipo = { acao: vazio(), fii: vazio(), outros: vazio(), tesouro: vazio() };
+  const porTicker = {};
+  // Tesouro, compra a compra
+  for (const [t, ls] of lotes) {
+    const pr = preco(t);
+    const r = vazio();
+    for (const l of ls) {
+      if (l.qtd <= 1e-9) continue;
+      const bruto = l.qtd * (pr || l.preco);
+      const custo = l.qtd * l.preco + l.custo;
+      const rend = Math.max(0, bruto - custo);
+      const dias = diasEntre(l.data, hoje);
+      const iof = dias < 30 ? rend * (IOF_TABELA[Math.max(0, dias - 1)] || 0) / 100 : 0;
+      const ir = (rend - iof) * aliquotaRendaFixa(dias);
+      r.bruto += bruto; r.custo += custo; r.lucro += bruto - custo; r.ir += ir; r.iof += iof;
+    }
+    r.liquido = r.bruto - r.ir - r.iof;
+    porTicker[t] = r;
+    for (const k of Object.keys(r)) porTipo.tesouro[k] += r[k];
+  }
+  // bolsa, por classe
+  for (const [t, p] of pos) {
+    if (p.qtd <= 1e-9) continue;
+    const g = p.tipo === 'acao' || p.tipo === 'fii' ? p.tipo : 'outros';
+    const pr = preco(t);
+    const bruto = pr ? p.qtd * pr : p.custo;
+    const r = { ...vazio(), bruto, custo: p.custo, lucro: bruto - p.custo, taxas: bruto * TAXA_B3_PADRAO };
+    porTicker[t] = r;
+    for (const k of ['bruto', 'custo', 'lucro', 'taxas']) porTipo[g][k] += r[k];
+  }
+  const a = porTipo.acao;
+  a.ir = a.bruto > 20000 ? Math.max(0, a.lucro - a.taxas) * 0.15 : 0; // isenção de R$ 20 mil em vendas de ações no mês
+  porTipo.fii.ir = Math.max(0, porTipo.fii.lucro - porTipo.fii.taxas) * 0.2;
+  porTipo.outros.ir = Math.max(0, porTipo.outros.lucro - porTipo.outros.taxas) * 0.15;
+  for (const g of ['acao', 'fii', 'outros']) porTipo[g].liquido = porTipo[g].bruto - porTipo[g].ir - porTipo[g].taxas;
+  // imposto de cada ativo da bolsa: parte proporcional ao lucro dele dentro da classe
+  for (const [t, p] of pos) {
+    const r = porTicker[t];
+    if (!r) continue;
+    const g = p.tipo === 'acao' || p.tipo === 'fii' ? p.tipo : 'outros';
+    const lucroPos = Object.entries(porTicker).filter(([t2]) => pos.get(t2)?.tipo === p.tipo || (g === 'outros' && pos.get(t2) && !['acao', 'fii'].includes(pos.get(t2).tipo))).reduce((s, [, x]) => s + Math.max(0, x.lucro), 0);
+    r.ir = lucroPos > 0 ? porTipo[g].ir * Math.max(0, r.lucro) / lucroPos : 0;
+    r.liquido = r.bruto - r.ir - r.taxas;
+  }
+  const total = vazio();
+  for (const g of Object.values(porTipo)) for (const k of Object.keys(total)) total[k] += g[k];
+  const arred = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, round2(v)]));
+  return {
+    total: arred(total),
+    porTipo: Object.fromEntries(Object.entries(porTipo).map(([k, v]) => [k, arred(v)])),
+    porTicker: Object.fromEntries(Object.entries(porTicker).map(([k, v]) => [k, arred(v)])),
+    acoesIsentas: a.bruto > 0 && a.bruto <= 20000,
+  };
+}

@@ -1,6 +1,6 @@
 import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
-  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, classesPorTicker, estimarCompra, fatoresDoMes, precoTesouroEm,
+  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, classesPorTicker, liquidoSeVender, estimarCompra, fatoresDoMes, precoTesouroEm,
 } from './calc.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
@@ -126,14 +126,16 @@ const ICONE_ATUALIZAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentCol
 
 function posicoes() {
   const c = carteira(S.compras, S.ativos, S.proventos);
-  return { ...c, porTicker: new Map(c.linhas.map((l) => [l.ticker, l])) };
+  const lq = liquidoSeVender(S.compras, S.ativos, hojeISO()).porTicker; // imposto se vendesse hoje
+  return { ...c, porTicker: new Map(c.linhas.map((l) => [l.ticker, { ...l, ir: (lq[l.ticker]?.ir || 0) + (lq[l.ticker]?.iof || 0), liquido: lq[l.ticker]?.liquido }])) };
 }
 
 function htmlPosicao(pos) {
   if (!pos || !pos.qtd) return '<small class="pos nada">nenhuma cota ainda</small>';
   const cls = pos.resultado == null ? '' : pos.resultado >= 0 ? 'var-alta' : 'var-baixa';
   const un = pos.tipo === 'tesouro' ? 'títulos' : pos.qtd === 1 ? 'cota' : 'cotas';
-  return `<small class="pos"><b>${fmtQtd(pos.qtd)} ${un}</b> · ${R(pos.valorAtual ?? pos.investido)}${pos.resultadoPct != null ? ` <span class="${cls}">${pct(pos.resultadoPct)}</span>` : ''}</small>`;
+  const liq = pos.ir >= 0.01 && pos.liquido != null ? ` · <span class="pos-liq" title="Descontado o IR de ${R(pos.ir)} se resgatasse hoje">líq. ${R(pos.liquido)}</span>` : '';
+  return `<small class="pos"><b>${fmtQtd(pos.qtd)} ${un}</b> · ${R(pos.valorAtual ?? pos.investido)}${pos.resultadoPct != null ? ` <span class="${cls}">${pct(pos.resultadoPct)}</span>` : ''}${liq}</small>`;
 }
 
 function htmlSubCarteira(cart) {
@@ -892,8 +894,21 @@ function htmlGrafico(largura) {
         <div class="conta-l"><span>Proventos reinvestidos<small>${porClasse(l.pvc) || 'dividendos, JCP, rendimentos'}</small></span><b class="num var-alta">${sinal(provS)}</b></div>` : ''}
         <div class="conta-l ${provS ? 'conta-sub' : ''}"><span>Investido</span><b class="num">${R(invS)}</b></div>
         ${valoriz != null ? `<div class="conta-l"><span>Valorização<small>${sel === n - 1 ? 'pelo preço das cotas hoje' : `pelo preço no fim de ${rotuloCurto(l.chave, per)}`}</small></span><b class="num ${valoriz >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(valoriz)}</b></div>
-        <div class="conta-l conta-total"><span>Valor da carteira</span><b class="num">${R(mercS)}</b></div>` : '<div class="conta-l conta-total"><span>Valor da carteira<small>sem preços para calcular</small></span><b class="num">—</b></div>'}
-        <div class="conta-ret"><span>Ganho<small>valorização + proventos, sobre o que saiu do bolso</small></span><b class="${ganho >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(ganho)} · ${pct(bolso ? ganho / bolso : null)}</b></div>
+        <div class="conta-l conta-total"><span>Valor da carteira</span><b class="num">${R(mercS)}</b></div>
+        ${sel === n - 1 ? (() => {
+          const lq = liquidoSeVender(dadosDoFiltro().compras, S.ativos, hojeISO());
+          const desc = lq.total.ir + lq.total.iof + lq.total.taxas;
+          return desc >= 0.01 ? `<div class="conta-l"><span>Imposto e taxas se vender hoje<small>IR ${R(lq.total.ir + lq.total.iof)} · taxas ${R(lq.total.taxas)}</small></span><b class="num var-baixa">− ${R(desc)}</b></div>
+          <div class="conta-l conta-liq"><span>Líquido</span><b class="num">${R(mercS - desc)}</b></div>` : '';
+        })() : ''}` : '<div class="conta-l conta-total"><span>Valor da carteira<small>sem preços para calcular</small></span><b class="num">—</b></div>'}
+        <div class="conta-ret"><span>Ganho total<small>valorização ${R(valoriz || 0)} + proventos ${R(provS)}, sobre o que saiu do bolso</small></span><b class="${ganho >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(ganho)} · ${pct(bolso ? ganho / bolso : null)}</b></div>
+        ${sel === n - 1 ? (() => {
+          const lq = liquidoSeVender(dadosDoFiltro().compras, S.ativos, hojeISO());
+          const desc = lq.total.ir + lq.total.iof + lq.total.taxas;
+          if (desc < 0.01) return '';
+          const g2 = ganho - desc;
+          return `<div class="conta-ret"><span>Ganho líquido<small>descontado o imposto e as taxas de vender hoje</small></span><b class="${g2 >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(g2)} · ${pct(bolso ? g2 / bolso : null)}</b></div>`;
+        })() : ''}
       </div>
       ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, cls, vale]) => {
         if (vale == null) return `<span><i class="sw ${cls}"></i>${nome}<b>${R(v)}</b></span>`;
@@ -1199,6 +1214,22 @@ function renderCarteira() {
       <div class="kpi"><small>Resultado</small><span class="num ${cls(c.resultado)}">${R(c.resultado)} <small class="${cls(c.resultado)}">${pct(c.investido ? c.resultado / c.investido : null)}</small></span>${c.realizado ? `<small class="kpi-extra">Vendas: <b class="${cls(c.realizado)}">${c.realizado > 0 ? '+' : ''}${R(c.realizado)}</b></small>` : ''}</div>
       <div class="kpi"><small>Proventos recebidos</small><span class="num">${R(c.proventos)}</span></div>
     </div>
+    ${(() => {
+      const lq = liquidoSeVender(S.compras, S.ativos, hojeISO());
+      if (!lq.total.bruto) return '';
+      const desc = lq.total.ir + lq.total.iof + lq.total.taxas;
+      const partes = [
+        lq.porTipo.tesouro.ir ? `IR do Tesouro ${R(lq.porTipo.tesouro.ir + lq.porTipo.tesouro.iof)}` : '',
+        lq.porTipo.acao.ir ? `IR de ações ${R(lq.porTipo.acao.ir)}` : lq.acoesIsentas ? 'ações isentas (até R$ 20 mil no mês)' : '',
+        lq.porTipo.fii.ir ? `IR de FIIs ${R(lq.porTipo.fii.ir)}` : lq.porTipo.fii.bruto ? 'FIIs sem lucro, sem IR' : '',
+        lq.porTipo.outros.ir ? `IR de ETF/BDR ${R(lq.porTipo.outros.ir)}` : '',
+        lq.total.taxas ? `taxas B3 ${R(lq.total.taxas)}` : '',
+      ].filter(Boolean).join(' · ');
+      return `<div class="liquido-faixa">
+        <div><small>Se vendesse tudo hoje, sobraria</small><b class="num">${R(lq.total.liquido)}</b></div>
+        <div class="liq-desc"><span class="var-baixa">− ${R(desc)}</span><small>${partes}</small></div>
+      </div>`;
+    })()}
 
     ${htmlGrafico()}
 

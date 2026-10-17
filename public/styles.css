@@ -750,3 +750,16 @@ html, body { overflow-x: clip; }
 /* no simples, o filtro da linha mostra a linha (não a hachura) */
 .filtros .sw.s-mercado.linha { width: 14px; height: 10px; border-radius: 0; box-shadow: none; background: linear-gradient(var(--tinta), var(--tinta)) center / 100% 2px no-repeat; }
 .filtros .filtro[aria-pressed="false"] .sw.s-mercado.linha { background: linear-gradient(var(--tinta-3), var(--tinta-3)) center / 100% 2px no-repeat; }
+
+/* quanto sobraria vendendo hoje */
+.liquido-faixa { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; padding: 12px 16px; border-radius: var(--raio); background: var(--folha); border: 1px solid var(--linha); box-shadow: var(--sombra); }
+.liquido-faixa small { display: block; font-size: 0.72rem; color: var(--tinta-3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+.liquido-faixa b { font: 700 1.2rem var(--f-display); }
+.liq-desc { text-align: right; min-width: 0; }
+.liq-desc span { font: 700 0.95rem var(--f-display); }
+.liq-desc small { text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 0.76rem; }
+.conta-liq { border-bottom: 0; }
+.conta-liq span { color: var(--tinta); font-weight: 700; }
+.conta-liq b { font-size: 1.1rem; }
+.pos-liq { color: var(--tinta-3); }
+@media (max-width: 520px) { .liq-desc { text-align: left; } }

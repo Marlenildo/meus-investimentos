@@ -16,6 +16,9 @@ export const TIPOS_PROVENTO = {
   jcp: 'JCP',
   rendimento: 'Rendimentos (FII)',
   juros: 'Juros / cupom',
+  atualizacao: 'Correção de proventos', // a B3 chama de "Rendimento" a correção paga junto com dividendos de ações
+  fracao: 'Venda de frações', // leilão das frações de bonificação ou incorporação
+  resgate: 'Resgate em dinheiro', // dinheiro devolvido numa incorporação ou resgate de cotas
   outro: 'Outros',
 };
 
@@ -212,11 +215,18 @@ export const CHAVE_PERIODO = {
 };
 
 /** Linhas em ordem cronológica: valor investido por tipo, total, proventos e acumulado. */
+/** Classe de cada ativo (ação, FII, tesouro, outros) pelo que foi comprado. */
+export function classesPorTicker(compras) {
+  const m = new Map();
+  for (const c of compras) m.set(c.ticker, c.tipo === 'acao' || c.tipo === 'fii' || c.tipo === 'tesouro' ? c.tipo : 'outros');
+  return m;
+}
+
 export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
   const chave = CHAVE_PERIODO[periodo] || CHAVE_PERIODO.mes;
   const m = new Map();
   const linha = (k) => {
-    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 }, pv: {} });
+    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 }, pv: {}, pvc: {} });
     return m.get(k);
   };
   const vendas = processarOperacoes(compras);
@@ -240,8 +250,11 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
     l.total += v;
     l.compras++;
   }
+  const classe = classesPorTicker(compras);
   for (const p of proventos) {
     const l = linha(chave(p.data));
+    const c = classe.get(p.ticker) || 'outros';
+    l.pvc[c] = (l.pvc[c] || 0) + Number(p.valor || 0); // proventos por classe: ações, FIIs…
     const t = TIPOS_PROVENTO[p.tipo] ? p.tipo : 'outro';
     l.proventos += Number(p.valor || 0);
     l.pv[t] = (l.pv[t] || 0) + Number(p.valor || 0); // por tipo, para empilhar no gráfico
@@ -257,6 +270,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
         total: round2(l.total), proventos: round2(l.proventos), acumulado: round2(acum),
         tx: Object.fromEntries(Object.entries(l.tx).map(([k, v]) => [k, round2(v)])),
         pv: Object.fromEntries(Object.entries(l.pv).map(([k, v]) => [k, round2(v)])),
+        pvc: Object.fromEntries(Object.entries(l.pvc).map(([k, v]) => [k, round2(v)])),
       };
     });
 }

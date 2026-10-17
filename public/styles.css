@@ -540,6 +540,9 @@ html, body { overflow-x: clip; }
 .pv-jcp { background: var(--pv-jcp); fill: var(--pv-jcp); }
 .pv-rendimento { background: var(--pv-rend); fill: var(--pv-rend); }
 .pv-juros { background: var(--pv-juros); fill: var(--pv-juros); }
+.pv-atualizacao { background: #c8dc8c; fill: #c8dc8c; }
+.pv-fracao { background: #9db8a7; fill: #9db8a7; }
+.pv-resgate { background: #4f7564; fill: #4f7564; }
 .pv-outro { background: var(--tinta-3); fill: var(--tinta-3); }
 .pv-resumo h3 { font: 700 0.9rem var(--f-display); margin: 0 0 4px; }
 .pv-total { font: 700 1.05rem var(--f-display); color: var(--tinta); }
@@ -679,3 +682,18 @@ html, body { overflow-x: clip; }
 .filtros .sw.s-mercado { width: 10px; height: 10px; border-radius: 3px; background: repeating-linear-gradient(45deg, var(--alta) 0 2px, color-mix(in srgb, var(--alta) 25%, transparent) 2px 4px); }
 .filtros .sw.s-mercado::after { display: none; }
 .filtros .filtro[aria-pressed="false"] .sw.s-mercado { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tinta-3); }
+/* valores escritos dentro da barra do acumulado */
+.grafico .seg-rot { font: 700 9.5px var(--f-texto); pointer-events: none; font-variant-numeric: tabular-nums; }
+.grafico .seg-inv { fill: #fff; paint-order: stroke; stroke: rgba(0, 0, 0, 0.25); stroke-width: 2px; }
+.grafico .seg-val { fill: var(--alta); paint-order: stroke; stroke: var(--folha); stroke-width: 3px; }
+.grafico .seg-prov { fill: #fff; paint-order: stroke; stroke: rgba(0, 0, 0, 0.3); stroke-width: 2px; }
+
+/* proventos por classe (ações, FIIs) */
+.pv-classes { display: grid; gap: 10px; border-top: 1px solid var(--linha); padding-top: 14px; }
+.pv-classes-grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.pv-classe { display: grid; gap: 7px; padding: 12px; border-radius: var(--raio); background: var(--folha-2); }
+.pv-classe .cc-linha span { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; }
+.pv-classe b { font: 700 1.05rem var(--f-display); }
+.pv-classe .pv-barra { height: 8px; }
+.pv-classe small { color: var(--tinta-3); font-size: 0.76rem; line-height: 1.4; }
+.det-classe { margin-top: 6px; font-size: 0.8rem; color: var(--tinta-2); }

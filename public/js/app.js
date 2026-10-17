@@ -1,6 +1,6 @@
 import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
-  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, estimarCompra, fatoresDoMes, precoTesouroEm,
+  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, classesPorTicker, estimarCompra, fatoresDoMes, precoTesouroEm,
 } from './calc.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
@@ -552,7 +552,8 @@ function abrirRegistrar() {
 
 // ---------- aba Carteira ----------
 // ---------- um gráfico só: investido por tipo + proventos, por dia, mês ou ano ----------
-const TIPOS_PROV_ORDEM = ['dividendo', 'jcp', 'rendimento', 'juros', 'outro'];
+const NOME_CLASSE = { acao: 'de ações', fii: 'de FIIs', tesouro: 'do Tesouro', outros: 'de outros' };
+const TIPOS_PROV_ORDEM = ['dividendo', 'jcp', 'rendimento', 'juros', 'atualizacao', 'fracao', 'resgate', 'outro'];
 const SERIES = [
   { k: 'prov', nome: 'Proventos' },
   { k: 'acao', nome: 'Ações' },
@@ -692,11 +693,13 @@ function htmlGrafico(largura) {
     const soma = { acao: 0, fii: 0, outros: 0, tesouro: 0, proventos: 0 };
     const tx = { acao: 0, fii: 0, outros: 0, tesouro: 0 };
     const pv = {};
+    const pvc = {};
     linhas = linhas.map((l) => {
       for (const k of Object.keys(soma)) soma[k] += l[k];
       for (const k of Object.keys(tx)) tx[k] += l.tx?.[k] || 0;
       for (const [k, v] of Object.entries(l.pv || {})) pv[k] = (pv[k] || 0) + v;
-      return { ...l, ...soma, tx: { ...tx }, pv: { ...pv } };
+      for (const [k, v] of Object.entries(l.pvc || {})) pvc[k] = (pvc[k] || 0) + v;
+      return { ...l, ...soma, tx: { ...tx }, pv: { ...pv }, pvc: { ...pvc } };
     });
   }
   const temTaxa = dadosDoFiltro().compras.some((c) => Number(c.custo) > 0);
@@ -787,6 +790,21 @@ function htmlGrafico(largura) {
         ap += v;
       });
     }
+    // dentro da barra: quanto é investido, valorização e proventos (quando cabe)
+    let rotSeg = '';
+    if (empilhaTudo && merc[i] != null && acc) {
+      const vz = merc[i] - acc;
+      const curto = (v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : Math.round(v).toLocaleString('pt-BR'));
+      const caberLargura = wInv >= 34;
+      const etiqueta = (vTopo, vBase, texto, cls) => {
+        const yT = y(vTopo), yB = y(vBase);
+        if (!caberLargura || yB - yT < 13) return '';
+        return `<text class="seg-rot ${cls}" x="${xInv + wInv / 2}" y="${(yT + yB) / 2 + 3.5}" text-anchor="middle">${texto}</text>`;
+      };
+      rotSeg += etiqueta(acc, 0, curto(acc), 'seg-inv');
+      if (vz > 0) rotSeg += etiqueta(acc + vz, acc, `+${curto(vz)}`, 'seg-val');
+      if (comProv && l.proventos) rotSeg += etiqueta(Math.max(0, merc[i]) + l.proventos, Math.max(0, merc[i]), `+${curto(l.proventos)}`, 'seg-prov');
+    }
     const topoBarra = Math.min(acc ? y(acc) : H, comProv && l.proventos ? y(l.proventos) : H, merc[i] != null ? y(totalEm(i)) - 6 : H);
     const [tx, anc] = slot >= 112 ? [cx, 'middle'] : i === 0 ? [i * slot + 4, 'start'] : i === n - 1 ? [(i + 1) * slot - 4, 'end'] : [cx, 'middle'];
     let rot = '';
@@ -801,7 +819,7 @@ function htmlGrafico(largura) {
     else if (comProv && l.proventos) rot = `<text class="v" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">${reais(l.proventos)}</text>`;
     return `<g class="slot ${i === sel ? 'sel' : ''}" data-graf-slot="${i}">
       <rect class="alvo" x="${i * slot + 3}" y="4" width="${slot - 6}" height="${H - 8}" rx="10"/>
-      ${segs}${extra}${prov}${rot}
+      ${segs}${extra}${prov}${rotSeg}${rot}
       <text class="x" x="${cx}" y="${H - 10}" text-anchor="middle">${rotuloCurto(l.chave, per)}</text>
     </g>`;
   }).join('');
@@ -822,6 +840,7 @@ function htmlGrafico(largura) {
       comMerc && !HIST ? 'calculando o valor de mercado…' : '',
       comProv ? `Proventos <b>${R(totProv)}</b>` : '',
     ].filter(Boolean).join(' · ');
+  const porClasse = (pvc) => Object.entries(NOME_CLASSE).filter(([k]) => (pvc?.[k] || 0) > 0).map(([k, nm]) => `${nm} ${R(pvc[k])}`).join(' · ');
   const conta = l && acum && pilha.length ? (() => {
     const invS = inv(l);
     const provS = l.proventos || 0;
@@ -835,16 +854,17 @@ function htmlGrafico(largura) {
       <div class="conta-cab"><b>${per === 'dia' ? 'Até ' : 'Até '}${rotuloLongo(l.chave, per).replace(/^Até /, '')}</b>${G.ativo ? `<span class="apagado">${esc(G.ativo)}</span>` : ''}</div>
       <div class="conta-linhas">
         <div class="conta-l"><span>Investido</span><b class="num">${R(invS)}</b></div>
-        ${valoriz != null ? `<div class="conta-l"><span>Valorização<small>preço das cotas hoje</small></span><b class="num ${valoriz >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(valoriz)}</b></div>` : ''}
-        <div class="conta-l"><span>Proventos<small>dividendos, JCP, rendimentos</small></span><b class="num ${provS ? 'var-alta' : ''}">${sinal(provS)}</b></div>
+        ${valoriz != null ? `<div class="conta-l"><span>Valorização<small>${sel === n - 1 ? 'pelo preço das cotas hoje' : `pelo preço no fim de ${rotuloCurto(l.chave, per)}`}</small></span><b class="num ${valoriz >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(valoriz)}</b></div>` : ''}
+        <div class="conta-l"><span>Proventos<small>${porClasse(l.pvc) || 'dividendos, JCP, rendimentos'}</small></span><b class="num ${provS ? 'var-alta' : ''}">${sinal(provS)}</b></div>
         <div class="conta-l conta-total"><span>Total${valoriz == null ? '<small>sem o valor de mercado</small>' : ''}</span><b class="num">${R(total)}</b></div>
         <div class="conta-ret"><span>Retorno</span><b class="${ganho >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(ganho)} · ${pct(invS ? ganho / invS : null)}</b></div>
       </div>
+      ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, cls]) => `<span><i class="sw ${cls}"></i>${nome}<b>${R(v)}</b></span>`).join('')}</div>` : ''}
     </div>`;
   })() : '';
   const detalhe = conta || (l ? `
     <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(l.chave, per)}</b>${pilha.length && inv(l) ? `<span>Investido <b>${R(inv(l))}</b>${comTaxa && l.taxa > 0 ? ` <span class="apagado">(taxas ${R(l.taxa)})</span>` : ''}${merc[sel] != null ? ` · Valia <b>${R(merc[sel])}</b> <span class="${merc[sel] >= inv(l) ? 'var-alta' : 'var-baixa'}">${merc[sel] >= inv(l) ? '+' : '−'}${R(Math.abs(merc[sel] - inv(l)))} (${pct(inv(l) ? merc[sel] / inv(l) - 1 : null)})</span>` : ''}</span>` : ''}</div>
-    ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, cls]) => `<span><i class="sw ${cls}"></i>${nome}<b>${R(v)}</b></span>`).join('')}${comProv && l.proventos ? `<span class="det-soma">Proventos<b>${R(l.proventos)}</b></span>` : ''}</div>` : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}` : '');
+    ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, cls]) => `<span><i class="sw ${cls}"></i>${nome}<b>${R(v)}</b></span>`).join('')}${comProv && l.proventos ? `<span class="det-soma">Proventos<b>${R(l.proventos)}</b></span>` : ''}</div>${comProv && l.proventos ? `<div class="det-classe">${porClasse(l.pvc)}</div>` : ''}` : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}` : '');
 
   return `
     <section class="bloco grafico-bloco" id="graf-hist">
@@ -1282,6 +1302,28 @@ function htmlResumoProventos() {
         ${tipos.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span>${esc(TIPOS_PROVENTO[k].replace(' (FII)', ''))}</span><b class="num">${R(por[k])}</b><small>${pctDe(por[k])}</small></div>`).join('')}
       </div>
       ${semTipo.length ? `<p class="aviso pv-aviso"><b>${R(semTipo.reduce((s, p) => s + Number(p.valor), 0))}</b> vieram da planilha antiga só com o total do mês, sem ativo nem tipo. Com o informe de rendimentos do banco dá para separar.</p>` : ''}
+
+      ${(() => {
+        const classe = classesPorTicker(S.compras);
+        const pc = {};
+        const pct2 = {};
+        for (const p of xs) {
+          const c = classe.get(p.ticker) || 'outros';
+          pc[c] = (pc[c] || 0) + Number(p.valor || 0);
+          pct2[c] = pct2[c] || {};
+          pct2[c][p.tipo] = (pct2[c][p.tipo] || 0) + Number(p.valor || 0);
+        }
+        const cls = ['acao', 'fii', 'tesouro', 'outros'].filter((k) => pc[k] > 0);
+        const nome = { acao: 'Ações', fii: 'Fundos imobiliários', tesouro: 'Tesouro', outros: 'Outros' };
+        return cls.length ? `<div class="pv-classes">
+          <h3>Por classe</h3>
+          <div class="pv-classes-grade">${cls.map((k) => `<div class="pv-classe">
+            <div class="cc-linha"><span><i class="sw s-${k === 'outros' ? 'outros' : k}"></i>${nome[k]}</span><b class="num">${R(pc[k])}</b></div>
+            ${barraTipos(pct2[k], pc[k])}
+            <small>${pctDe(pc[k])} do total · ${TIPOS_PROV_ORDEM.filter((t) => pct2[k][t] > 0).map((t) => `${esc(TIPOS_PROVENTO[t].replace(' (FII)', ''))} ${R(pct2[k][t])}`).join(' · ')}</small>
+          </div>`).join('')}</div>
+        </div>` : '';
+      })()}
 
       <div class="pv-ativos">
         <h3>Por ativo</h3>

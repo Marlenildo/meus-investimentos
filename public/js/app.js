@@ -705,7 +705,7 @@ function htmlGrafico(largura) {
   // as taxas viram uma faixa própria no topo da barra (ou somem, com o filtro desligado)
   linhas = linhas.map(semTaxas);
   const podeMerc = acum && per !== 'dia' && dadosDoFiltro().compras.length > 0;
-  if (podeMerc) presentes.push({ k: 'mercado', nome: 'Total (mercado + proventos)' });
+  if (podeMerc) presentes.push({ k: 'mercado', nome: 'Valorização' });
   const ativos = new Set((G.hist || []).filter((k) => presentes.some((x) => x.k === k)));
   const pilha = PILHA.filter((k) => ativos.has(k));
   const comProv = ativos.has('prov');
@@ -736,7 +736,8 @@ function htmlGrafico(largura) {
   const totalEm = (i) => (merc[i] != null ? merc[i] + (linhas[i].proventos || 0) : null); // a linha mostra o total: mercado + proventos
   const maxV = Math.max(1, ...linhas.map((l, i) => Math.max(inv(l), comProv ? l.proventos : 0, totalEm(i) || 0)));
   const y = (v) => topo + alt * (1 - v / maxV);
-  const duas = pilha.length && comProv;
+  const empilhaTudo = comMerc && HIST && pilha.length > 0; // acumulado: investido + valorização + proventos na mesma barra
+  const duas = pilha.length && comProv && !empilhaTudo;
   const wInv = Math.min(56, Math.max(18, slot * (duas ? 0.38 : 0.5)));
   const wProv = duas ? Math.min(30, Math.max(10, slot * 0.2)) : wInv;
   const sel = Math.min(G.sel ?? n - 1, n - 1);
@@ -755,19 +756,34 @@ function htmlGrafico(largura) {
       const y1 = y(acc + v), y0 = y(acc);
       const ultimo = j === visiveis.length - 1;
       const h = Math.max(1.5, y0 - y1 - (j ? 2 : 0));
-      segs += ultimo ? barra(xInv, y1, wInv, h, 5, `s-${k}`) : `<rect class="s-${k}" x="${xInv}" y="${y1}" width="${wInv}" height="${h}"/>`;
+      segs += ultimo && !(empilhaTudo && merc[i] != null) ? barra(xInv, y1, wInv, h, 5, `s-${k}`) : `<rect class="s-${k}" x="${xInv}" y="${y1}" width="${wInv}" height="${h}"/>`;
       acc += v;
     });
-    // proventos empilhados por tipo (dividendos, JCP, rendimentos…)
+    // valorização: a parte que o preço das cotas somou (ou tirou) do investido
+    let extra = '';
+    let baseProv = 0;
+    if (empilhaTudo && merc[i] != null && acc) {
+      const vz = merc[i] - acc;
+      if (vz > 0) {
+        const y1 = y(acc + vz), y0 = y(acc);
+        extra += `<rect class="s-valoriz" x="${xInv}" y="${y1}" width="${wInv}" height="${Math.max(1.5, y0 - y1 - 2)}"/>`;
+      } else if (vz < 0) {
+        const y1 = y(acc), y0 = y(acc + vz);
+        extra += `<rect class="s-perda" x="${xInv}" y="${y1}" width="${wInv}" height="${Math.max(1.5, y0 - y1)}"/>`;
+      }
+      baseProv = Math.max(0, merc[i]);
+    }
+    // proventos empilhados por tipo (dividendos, JCP, rendimentos…); no acumulado, em cima da valorização
     let prov = '';
     if (comProv && l.proventos) {
       const tipos = TIPOS_PROV_ORDEM.filter((k) => (l.pv?.[k] || 0) > 0);
-      let ap = 0;
+      let ap = empilhaTudo ? baseProv : 0;
+      const xP = empilhaTudo ? xInv : xProv, wP = empilhaTudo ? wInv : wProv;
       tipos.forEach((k, j) => {
         const v = l.pv[k];
         const y1 = y(ap + v), y0 = y(ap);
-        const h = Math.max(1.5, y0 - y1 - (j ? 1.5 : 0));
-        prov += j === tipos.length - 1 ? barra(xProv, y1, wProv, h, 4, `pv-${k}`) : `<rect class="pv-${k}" x="${xProv}" y="${y1}" width="${wProv}" height="${h}"/>`;
+        const h = Math.max(1.5, y0 - y1 - (j || empilhaTudo ? 1.5 : 0));
+        prov += j === tipos.length - 1 ? barra(xP, y1, wP, h, 4, `pv-${k}`) : `<rect class="pv-${k}" x="${xP}" y="${y1}" width="${wP}" height="${h}"/>`;
         ap += v;
       });
     }
@@ -785,7 +801,7 @@ function htmlGrafico(largura) {
     else if (comProv && l.proventos) rot = `<text class="v" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">${reais(l.proventos)}</text>`;
     return `<g class="slot ${i === sel ? 'sel' : ''}" data-graf-slot="${i}">
       <rect class="alvo" x="${i * slot + 3}" y="4" width="${slot - 6}" height="${H - 8}" rx="10"/>
-      ${segs}${prov}${rot}
+      ${segs}${extra}${prov}${rot}
       <text class="x" x="${cx}" y="${H - 10}" text-anchor="middle">${rotuloCurto(l.chave, per)}</text>
     </g>`;
   }).join('');
@@ -854,6 +870,10 @@ function htmlGrafico(largura) {
         ${presentes.map((x) => `<button type="button" class="filtro" data-graf-serie="${x.k}" aria-pressed="${ativos.has(x.k)}"><i class="sw s-${x.k}"></i>${x.nome}</button>`).join('')}
       </div>
       ${n ? `<div class="graf-rolagem" data-largura="${L}"><svg class="grafico" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Investimentos${comProv ? ' e proventos' : ''} por ${per === 'mes' ? 'mês' : per}${acum ? ', acumulado' : ''}">
+        <defs>
+          <pattern id="hach-valoriz" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hach-fundo-alta" width="6" height="6"/><line class="hach-linha-alta" x1="0" y1="0" x2="0" y2="6"/></pattern>
+          <pattern id="hach-perda" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hach-fundo-baixa" width="6" height="6"/><line class="hach-linha-baixa" x1="0" y1="0" x2="0" y2="6"/></pattern>
+        </defs>
         ${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}${linhaMerc}</svg></div>
       <div class="graf-detalhe">${detalhe}</div>` : '<p class="dica">Ainda não há compras nem proventos para mostrar.</p>'}
     </section>`;

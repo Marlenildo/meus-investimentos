@@ -666,3 +666,16 @@ html, body { overflow-x: clip; }
 .conta-total b { font-size: 1.15rem; }
 .conta-ret { display: flex; justify-content: space-between; font-size: 0.84rem; color: var(--tinta-2); }
 .conta-ret b { font-weight: 700; }
+
+/* valorização (e perda) empilhada na barra do acumulado */
+.grafico .s-valoriz { fill: url(#hach-valoriz); }
+.grafico .s-perda { fill: url(#hach-perda); }
+.hach-fundo-alta { fill: var(--alta); opacity: 0.22; }
+.hach-linha-alta { stroke: var(--alta); stroke-width: 3; }
+.hach-fundo-baixa { fill: var(--baixa); opacity: 0.18; }
+.hach-linha-baixa { stroke: var(--baixa); stroke-width: 3; }
+.sw.s-valoriz { background: repeating-linear-gradient(45deg, var(--alta) 0 2px, color-mix(in srgb, var(--alta) 25%, transparent) 2px 4px); }
+.filtro[aria-pressed="false"] .sw.s-valoriz { background: transparent; }
+.filtros .sw.s-mercado { width: 10px; height: 10px; border-radius: 3px; background: repeating-linear-gradient(45deg, var(--alta) 0 2px, color-mix(in srgb, var(--alta) 25%, transparent) 2px 4px); }
+.filtros .sw.s-mercado::after { display: none; }
+.filtros .filtro[aria-pressed="false"] .sw.s-mercado { background: transparent; box-shadow: inset 0 0 0 1.5px var(--tinta-3); }

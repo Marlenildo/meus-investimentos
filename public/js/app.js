@@ -820,8 +820,15 @@ window.addEventListener('resize', () => { clearTimeout(redimT); redimT = setTime
 function ligarHistorico() {
   ligarRemover('data-del-compra', 'compras');
   $('#conteudo').addEventListener('click', (e) => {
+    if (e.target.closest('[data-del-compra]')) return; // a lixeira não abre o editor
     const b = e.target.closest('[data-edit-compra]');
     if (b) abrirEditarCompra(b.dataset.editCompra);
+  });
+  $('#conteudo').addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card-compra')) {
+      e.preventDefault();
+      abrirEditarCompra(e.target.dataset.editCompra);
+    }
   });
   ligarGrafico();
 }
@@ -965,16 +972,32 @@ function renderCarteira() {
       ${[...porMes.entries()].map(([mes, xs], i) => `
         <details class="mes-grupo" ${i === 0 ? 'open' : ''}>
           <summary class="mes-cab"><span>${nomeMesAno(mes).replace(/^./, (c) => c.toUpperCase())}</span><span class="num">${R(xs.reduce((s, x) => s + x.qtd * x.preco + (x.custo || 0), 0))}</span></summary>
-          ${xs.map((x) => `<div class="item">
-            <span><b>${esc(x.ticker)}</b> · ${fmtQtd(x.qtd)} ${x.tipo === 'tesouro' ? 'tít.' : 'cotas'} × ${R(x.preco)}<small>${x.importado ? `${nomeMesAno(mes)} · da planilha, quantidade estimada` : `${dataBR(x.data)} · ${esc(banco(x.banco)?.nome || x.banco || '')}`}${Number(x.custo) > 0 ? ` · taxa ${R(x.custo)}` : ''}</small></span>
-            <span class="num">${R(x.qtd * x.preco + (x.custo || 0))}</span>
-            <span class="item-acoes">
-              <button type="button" class="x editar" data-edit-compra="${x.id}" aria-label="Editar compra de ${esc(x.ticker)}">editar</button>
-              <button type="button" class="x" data-del-compra="${x.id}" aria-label="Remover compra de ${esc(x.ticker)}">remover</button>
-            </span>
-          </div>`).join('')}
+          <div class="compras-lista">${xs.map(htmlCardCompra).join('')}</div>
         </details>`).join('')}
     </section>`;
+}
+
+const ICONE_EDITAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+const ICONE_LIXO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>';
+
+/** Uma compra como card: toque em qualquer lugar para editar; lixeira pede confirmação. */
+function htmlCardCompra(x) {
+  const tes = x.tipo === 'tesouro';
+  const total = x.qtd * x.preco + (x.custo || 0);
+  const quando = x.importado ? `${nomeMesAno(mesDe(x.data))} · da planilha` : `${dataBR(x.data)} · ${esc(banco(x.banco)?.nome || x.banco || '')}`;
+  return `<div class="card-compra" role="button" tabindex="0" data-edit-compra="${x.id}" aria-label="Editar compra de ${esc(x.ticker)}, ${dataBR(x.data)}">
+    ${htmlLogo({ ticker: x.ticker, tipo: x.tipo })}
+    <div class="cc-info">
+      <div class="cc-linha"><b class="cc-ticker">${esc(x.ticker)}</b><span class="cc-total num">${R(total)}</span></div>
+      <div class="cc-linha cc-sub"><span>${fmtQtd(x.qtd)} ${tes ? (x.qtd === 1 ? 'título' : 'títulos') : (x.qtd === 1 ? 'cota' : 'cotas')} × ${R(x.preco)}</span>${Number(x.custo) > 0 ? `<span class="cc-taxa">taxa ${R(x.custo)}</span>` : ''}</div>
+      <div class="cc-linha cc-rodape"><small>${quando}${x.importado ? ' <span class="cc-tag">estimada</span>' : ''}</small>
+        <span class="cc-acoes">
+          <button type="button" class="ic-btn" data-edit-compra="${x.id}" title="Editar" aria-label="Editar compra de ${esc(x.ticker)}">${ICONE_EDITAR}</button>
+          <button type="button" class="ic-btn perigo" data-del-compra="${x.id}" title="Remover" aria-label="Remover compra de ${esc(x.ticker)}">${ICONE_LIXO}</button>
+        </span>
+      </div>
+    </div>
+  </div>`;
 }
 
 function groupBy(xs, f) {
@@ -989,10 +1012,10 @@ function ligarRemover(attr, colecao) {
     const b = e.target.closest(`[${attr}]`);
     if (!b) return;
     if (!b.classList.contains('confirmar')) {
-      const original = b.textContent;
+      const original = b.innerHTML;
       b.classList.add('confirmar');
-      b.textContent = colecao === 'ativos' ? 'tirar?' : 'confirmar?';
-      setTimeout(() => { if (b.isConnected) { b.classList.remove('confirmar'); b.textContent = original; } }, 3000);
+      b.innerHTML = b.classList.contains('ic-btn') ? `${ICONE_LIXO}<span>remover?</span>` : colecao === 'ativos' ? 'tirar?' : 'confirmar?';
+      setTimeout(() => { if (b.isConnected) { b.classList.remove('confirmar'); b.innerHTML = original; } }, 3000);
       return;
     }
     const id = b.getAttribute(attr);

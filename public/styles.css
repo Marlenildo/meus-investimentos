@@ -701,3 +701,5 @@ html, body { overflow-x: clip; }
 .conta-sub span { color: var(--tinta); font-weight: 600; }
 .conta-ret span { display: grid; }
 .conta-ret small { font-size: 0.7rem; color: var(--tinta-3); }
+.grafico .seg-perda { fill: #fff; paint-order: stroke; stroke: var(--baixa); stroke-width: 2.5px; }
+.grafico .seg-provtot { fill: var(--pv-div); font-size: 8.5px; }

@@ -717,11 +717,9 @@ function htmlGrafico(largura) {
   const inv = (l) => pilhaBarra.reduce((s, k) => s + (l[k] || 0), 0);
   const comMerc = podeMerc && ativos.has('mercado');
   if (comMerc && !HIST) garantirHistorico();
-  const merc = linhas.map((l) => {
-    if (!comMerc || !HIST) return null;
-    const m = mercadoAte(fimDoPeriodo(l.chave, per));
-    return pilha.reduce((s, k) => s + m[k], 0);
-  });
+  // valor de mercado de cada classe (ações, FIIs, tesouro…) no fim de cada período
+  const mercPorTipo = linhas.map((l) => (comMerc && HIST ? mercadoAte(fimDoPeriodo(l.chave, per)) : null));
+  const merc = mercPorTipo.map((m) => (m ? pilha.reduce((s, k) => s + m[k], 0) : null));
   const brutas = linhasDoGrafico(per);
   const totTaxa = comTaxa ? brutas.reduce((s, l) => s + taxasDe(l, pilha), 0) : 0;
   const totInv = brutas.map(semTaxas).reduce((s, l) => s + pilha.reduce((t, k) => t + l[k], 0), 0) + totTaxa;
@@ -753,27 +751,46 @@ function htmlGrafico(largura) {
     const largGrupo = duas ? wInv + 4 + wProv : wInv;
     const xInv = cx - largGrupo / 2;
     const xProv = duas ? xInv + wInv + 4 : cx - wProv / 2;
-    let acc = 0, segs = '';
-    const visiveis = pilhaBarra.filter((k) => l[k] > 0);
-    visiveis.forEach((k, j) => {
-      const v = l[k];
-      const y1 = y(acc + v), y0 = y(acc);
-      const ultimo = j === visiveis.length - 1;
-      const h = Math.max(1.5, y0 - y1 - (j ? 2 : 0));
-      segs += ultimo && !(empilhaTudo && merc[i] != null) ? barra(xInv, y1, wInv, h, 5, `s-${k}`) : `<rect class="s-${k}" x="${xInv}" y="${y1}" width="${wInv}" height="${h}"/>`;
-      acc += v;
-    });
-    // valorização: a parte que o preço das cotas somou (ou tirou) do investido
-    let extra = '';
-    if (empilhaTudo && merc[i] != null && acc) {
-      const vz = merc[i] - acc;
-      if (vz > 0) {
-        const y1 = y(acc + vz), y0 = y(acc);
-        extra += `<rect class="s-valoriz" x="${xInv}" y="${y1}" width="${wInv}" height="${Math.max(1.5, y0 - y1 - 2)}"/>`;
-      } else if (vz < 0) {
-        const y1 = y(acc), y0 = y(acc + vz);
-        extra += `<rect class="s-perda" x="${xInv}" y="${y1}" width="${wInv}" height="${Math.max(1.5, y0 - y1)}"/>`;
-      }
+    let acc = 0, segs = '', extra = '', rotSeg = '';
+    const curto = (v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : Math.round(v).toLocaleString('pt-BR'));
+    const etiqueta = (x, w, vTopo, vBase, texto, cls) => {
+      const yT = y(vTopo), yB = y(vBase);
+      if (w < 30 || yB - yT < 12) return '';
+      return `<text class="seg-rot ${cls}" x="${x + w / 2}" y="${(yT + yB) / 2 + 3.5}" text-anchor="middle">${texto}</text>`;
+    };
+    if (empilhaTudo && mercPorTipo[i]) {
+      // cada classe: o que foi investido (cheio) e, em cima dela, a valorização (hachurada)
+      const mk = mercPorTipo[i];
+      pilha.forEach((k, j) => {
+        const investido = (l[k] || 0) + (comTaxa ? l.tx?.[k] || 0 : 0);
+        const vale = mk[k] || 0;
+        if (investido <= 0 && vale <= 0) return;
+        const cheio = Math.min(investido, vale);
+        const gap = j ? 1.5 : 0;
+        const y1 = y(acc + cheio), y0 = y(acc);
+        segs += `<rect class="s-${k}" x="${xInv}" y="${y1}" width="${wInv}" height="${Math.max(1.5, y0 - y1 - gap)}"/>`;
+        const dif = vale - investido;
+        if (dif >= 1) {
+          const v1 = y(acc + vale), v0 = y(acc + cheio);
+          extra += `<rect class="s-valoriz" x="${xInv}" y="${v1}" width="${wInv}" height="${Math.max(1, v0 - v1)}"/>`;
+          rotSeg += etiqueta(xInv, wInv, acc + vale, acc + cheio, `+${curto(dif)}`, 'seg-val');
+        }
+        // investido escrito no bloco cheio; se a classe perdeu, a perda aparece embaixo, em vermelho
+        const temPerda = dif <= -1 && y0 - y1 >= 26; // diferença de centavos não vira rótulo
+        rotSeg += etiqueta(xInv, wInv, acc + cheio, acc, curto(investido), 'seg-inv').replace(/y="([\d.]+)"/, (m, v) => (temPerda ? `y="${Number(v) - 6}"` : m));
+        if (temPerda) rotSeg += `<text class="seg-rot seg-perda" x="${xInv + wInv / 2}" y="${(y1 + y0) / 2 + 9}" text-anchor="middle">−${curto(-dif)}</text>`;
+        acc += vale;
+      });
+    } else {
+      const visiveis = pilhaBarra.filter((k) => l[k] > 0);
+      visiveis.forEach((k, j) => {
+        const v = l[k];
+        const y1 = y(acc + v), y0 = y(acc);
+        const ultimo = j === visiveis.length - 1;
+        const h = Math.max(1.5, y0 - y1 - (j ? 2 : 0));
+        segs += ultimo ? barra(xInv, y1, wInv, h, 5, `s-${k}`) : `<rect class="s-${k}" x="${xInv}" y="${y1}" width="${wInv}" height="${h}"/>`;
+        acc += v;
+      });
     }
     // proventos empilhados por tipo (dividendos, JCP, rendimentos…); no acumulado, em cima da valorização
     let prov = '';
@@ -789,19 +806,9 @@ function htmlGrafico(largura) {
         ap += v;
       });
     }
-    // dentro da barra: quanto é investido, valorização e proventos (quando cabe)
-    let rotSeg = '';
-    if (empilhaTudo && merc[i] != null && acc) {
-      const vz = merc[i] - acc;
-      const curto = (v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : Math.round(v).toLocaleString('pt-BR'));
-      const caberLargura = wInv >= 32;
-      const etiqueta = (vTopo, vBase, texto, cls) => {
-        const yT = y(vTopo), yB = y(vBase);
-        if (!caberLargura || yB - yT < 13) return '';
-        return `<text class="seg-rot ${cls}" x="${xInv + wInv / 2}" y="${(yT + yB) / 2 + 3.5}" text-anchor="middle">${texto}</text>`;
-      };
-      rotSeg += etiqueta(acc, 0, curto(acc), 'seg-inv');
-      if (vz > 0) rotSeg += etiqueta(acc + vz, acc, `+${curto(vz)}`, 'seg-val');
+    // número dos proventos acima da barrinha deles
+    if (empilhaTudo && comProv && l.proventos) {
+      rotSeg += `<text class="seg-rot seg-provtot" x="${xProv + wProv / 2}" y="${y(l.proventos) - 4}" text-anchor="middle">${curto(l.proventos)}</text>`;
     }
     const topoBarra = Math.min(acc ? y(acc) : H, comProv && l.proventos ? y(l.proventos) : H, merc[i] != null ? y(totalEm(i)) - 6 : H);
     const [tx, anc] = slot >= 112 ? [cx, 'middle'] : i === 0 ? [i * slot + 4, 'start'] : i === n - 1 ? [(i + 1) * slot - 4, 'end'] : [cx, 'middle'];
@@ -809,7 +816,7 @@ function htmlGrafico(largura) {
     if (merc[i] != null && acc) {
       // em cima: quanto a carteira valia; embaixo, a valorização sobre o investido
       const total = merc[i];
-      const ganho = total - acc;
+      const ganho = total - inv(l); // valorização sobre o investido
       rot = `<text class="v" x="${tx}" y="${topoBarra - 22}" text-anchor="${anc}">${reais(total)}</text>`
         + `<text class="v2 ${ganho >= 0 ? 'ganho' : 'perda'}" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">${ganho >= 0 ? '+' : '−'} ${reais(Math.abs(ganho))}</text>`;
     } else if (acc && comProv && l.proventos) rot = `<text class="v" x="${tx}" y="${topoBarra - 22}" text-anchor="${anc}">${reais(acc)}</text><text class="v2" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">+ ${reais(l.proventos)}</text>`;
@@ -827,9 +834,9 @@ function htmlGrafico(largura) {
 
   const l = linhas[sel];
   const itens = l ? [
-    ...pilhaBarra.map((k) => [k === 'taxa' ? 'Taxas' : SERIES.find((x) => x.k === k).nome, l[k], `s-${k}`]),
+    ...pilhaBarra.map((k) => [k === 'taxa' ? 'Taxas' : SERIES.find((x) => x.k === k).nome, l[k], `s-${k}`, k !== 'taxa' && empilhaTudo && mercPorTipo[sel] ? mercPorTipo[sel][k] : null, k]),
     ...(comProv ? TIPOS_PROV_ORDEM.map((k) => [TIPOS_PROVENTO[k].replace(' (FII)', ''), l.pv?.[k] || 0, `pv-${k}`]) : []),
-  ].filter(([, v]) => v > 0) : [];
+  ].filter(([, v, cls]) => v > 0 && !(empilhaTudo && cls === 's-taxa')) : []; // no acumulado as taxas já estão dentro de cada classe
   const temMercHoje = comMerc && HIST && merc[n - 1] != null;
   const subCab = acum && temMercHoje
     ? `Investido <b>${R(totInv)}</b> → carteira hoje <b>${R(merc[n - 1])}</b> <span class="${merc[n - 1] >= totInv ? 'var-alta' : 'var-baixa'}">${pct(totInv ? merc[n - 1] / totInv - 1 : null)}</span>${totProvTodos ? ` · proventos <b>${R(totProvTodos)}</b>` : ''}`
@@ -858,7 +865,12 @@ function htmlGrafico(largura) {
         <div class="conta-l conta-total"><span>Valor da carteira</span><b class="num">${R(mercS)}</b></div>` : '<div class="conta-l conta-total"><span>Valor da carteira<small>sem preços para calcular</small></span><b class="num">—</b></div>'}
         <div class="conta-ret"><span>Ganho<small>valorização + proventos, sobre o que saiu do bolso</small></span><b class="${ganho >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(ganho)} · ${pct(bolso ? ganho / bolso : null)}</b></div>
       </div>
-      ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, cls]) => `<span><i class="sw ${cls}"></i>${nome}<b>${R(v)}</b></span>`).join('')}</div>` : ''}
+      ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, cls, vale, k]) => {
+        if (vale == null) return `<span><i class="sw ${cls}"></i>${nome}<b>${R(v)}</b></span>`;
+        const inv0 = v + (comTaxa ? l.tx?.[k] || 0 : 0);
+        const d = vale - inv0;
+        return `<span><i class="sw ${cls}"></i>${nome}<b>${R(inv0)}</b><b class="${d >= 0 ? 'var-alta' : 'var-baixa'}">${d >= 0 ? '+' : '−'}${R(Math.abs(d))}</b></span>`;
+      }).join('')}</div>` : ''}
     </div>`;
   })() : '';
   const detalhe = conta || (l ? `

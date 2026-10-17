@@ -490,3 +490,6 @@ html, body { overflow-x: clip; }
   .bn .num { display: block; font-size: min(1rem, 4.4vw); overflow: hidden; text-overflow: ellipsis; }
   .navbar a.ativa::before { content: ""; position: absolute; top: 0; left: 28%; right: 28%; height: 3px; border-radius: 0 0 3px 3px; background: var(--gradiente); }
 }
+
+/* Grades de uma coluna nunca crescem com o conteúdo: um texto longo quebra a linha em vez de alargar o bloco */
+.conteudo, .bloco { grid-template-columns: minmax(0, 1fr); }

@@ -741,3 +741,9 @@ html, body { overflow-x: clip; }
 .graf-legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.76rem; color: var(--tinta-3); margin-top: -4px; }
 .graf-legenda span { display: inline-flex; align-items: center; gap: 6px; }
 .sw.s-perda-sw { background: repeating-linear-gradient(45deg, var(--baixa) 0 2px, color-mix(in srgb, var(--baixa) 22%, transparent) 2px 4px); }
+.s-investido { fill: var(--violeta); background: var(--violeta); }
+.grafico .s-prov { fill: var(--pv-div); }
+/* rótulos legíveis mesmo quando a linha passa por trás */
+.grafico text.v, .grafico text.v2 { paint-order: stroke; stroke: var(--folha); stroke-width: 4px; stroke-linejoin: round; }
+.grafico .slot.sel text.v, .grafico .slot.sel text.v2 { stroke: color-mix(in srgb, var(--violeta) 10%, var(--folha)); }
+.grafico .linha-merc { stroke-width: 1.75px; opacity: 0.85; }

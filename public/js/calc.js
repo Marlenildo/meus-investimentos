@@ -450,3 +450,27 @@ export function liquidoSeVender(compras, ativos, hoje) {
     acoesIsentas: a.bruto > 0 && a.bruto <= 20000,
   };
 }
+
+// ---------- liquidação: quando a compra entra de fato na custódia ----------
+// Feriados da B3 (sem pregão). Fins de semana também não contam.
+const FERIADOS_B3 = new Set([
+  '2025-01-01', '2025-03-03', '2025-03-04', '2025-04-18', '2025-04-21', '2025-05-01', '2025-06-19', '2025-11-20', '2025-12-24', '2025-12-25', '2025-12-31',
+  '2026-01-01', '2026-02-16', '2026-02-17', '2026-04-03', '2026-04-21', '2026-05-01', '2026-06-04', '2026-09-07', '2026-10-12', '2026-11-02', '2026-11-20', '2026-12-24', '2026-12-25', '2026-12-31',
+  '2027-01-01', '2027-02-08', '2027-02-09', '2027-03-26', '2027-04-21', '2027-05-01', '2027-05-27', '2027-09-07', '2027-10-12', '2027-11-02', '2027-11-15', '2027-11-20', '2027-12-24', '2027-12-25', '2027-12-31',
+]);
+const diaUtil = (iso) => {
+  const d = new Date(`${iso}T12:00:00`);
+  return d.getDay() !== 0 && d.getDay() !== 6 && !FERIADOS_B3.has(iso);
+};
+const somaDia = (iso, n) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+
+/** Dia em que a operação liquida: bolsa em D+2 (dias úteis); Tesouro no mesmo dia. */
+export function dataLiquidacao(c) {
+  if (c.tipo === 'tesouro') return c.data;
+  let d = c.data, uteis = 0;
+  while (uteis < 2) { d = somaDia(d, 1); if (diaUtil(d)) uteis++; }
+  return d;
+}
+
+/** Compras e vendas da bolsa que ainda não liquidaram (não aparecem na custódia do banco). */
+export const emLiquidacao = (compras, hoje) => compras.filter((c) => ladoDe(c) !== 'B' && ladoDe(c) !== 'A' && dataLiquidacao(c) > hoje);

@@ -1,6 +1,6 @@
 import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
-  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, classesPorTicker, liquidoSeVender, estimarCompra, fatoresDoMes, precoTesouroEm,
+  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, classesPorTicker, liquidoSeVender, dataLiquidacao, emLiquidacao, estimarCompra, fatoresDoMes, precoTesouroEm,
 } from './calc.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
@@ -120,14 +120,31 @@ function renderBoleta() {
     </div>`;
 }
 
+/** O que ainda está liquidando (bolsa, D+2): valor a preço de hoje e o dia em que entra na custódia. */
+function liquidando() {
+  const xs = emLiquidacao(S.compras, hojeISO());
+  let valor = 0, ate = '';
+  const porTicker = new Map();
+  for (const c of xs) {
+    const pr = Number(S.ativos.find((a) => a.ticker === c.ticker)?.preco) || Number(c.preco);
+    const sinal = ladoDe(c) === 'V' ? -1 : 1;
+    valor += sinal * Number(c.qtd) * pr;
+    porTicker.set(c.ticker, (porTicker.get(c.ticker) || 0) + sinal * Number(c.qtd));
+    const d = dataLiquidacao(c);
+    if (d > ate) ate = d;
+  }
+  return { xs, valor: round2(valor), ate, porTicker };
+}
+
 // ---------- aba Comprar (tela inicial) ----------
 const fmtPreco = (v) => (v ? v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '');
 const ICONE_ATUALIZAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>';
 
 function posicoes() {
   const c = carteira(S.compras, S.ativos, S.proventos);
+  const pend = liquidando().porTicker;
   const lq = liquidoSeVender(S.compras, S.ativos, hojeISO()).porTicker; // imposto se vendesse hoje
-  return { ...c, porTicker: new Map(c.linhas.map((l) => [l.ticker, { ...l, ir: (lq[l.ticker]?.ir || 0) + (lq[l.ticker]?.iof || 0), liquido: lq[l.ticker]?.liquido }])) };
+  return { ...c, porTicker: new Map(c.linhas.map((l) => [l.ticker, { ...l, aLiquidar: pend.get(l.ticker) || 0, ir: (lq[l.ticker]?.ir || 0) + (lq[l.ticker]?.iof || 0), liquido: lq[l.ticker]?.liquido }])) };
 }
 
 function htmlPosicao(pos) {
@@ -135,7 +152,8 @@ function htmlPosicao(pos) {
   const cls = pos.resultado == null ? '' : pos.resultado >= 0 ? 'var-alta' : 'var-baixa';
   const un = pos.tipo === 'tesouro' ? 'títulos' : pos.qtd === 1 ? 'cota' : 'cotas';
   const liq = pos.ir >= 0.01 && pos.liquido != null ? ` · <span class="pos-liq" title="Descontado o IR de ${R(pos.ir)} se resgatasse hoje">líq. ${R(pos.liquido)}</span>` : '';
-  return `<small class="pos"><b>${fmtQtd(pos.qtd)} ${un}</b> · ${R(pos.valorAtual ?? pos.investido)}${pos.resultadoPct != null ? ` <span class="${cls}">${pct(pos.resultadoPct)}</span>` : ''}${liq}</small>`;
+  const aliq = pos.aLiquidar ? ` <span class="pos-liq" title="Ainda liquidando: entra na custódia em até dois dias úteis">(${fmtQtd(pos.aLiquidar)} a liquidar)</span>` : '';
+  return `<small class="pos"><b>${fmtQtd(pos.qtd)} ${un}</b>${aliq} · ${R(pos.valorAtual ?? pos.investido)}${pos.resultadoPct != null ? ` <span class="${cls}">${pct(pos.resultadoPct)}</span>` : ''}${liq}</small>`;
 }
 
 function htmlSubCarteira(cart) {
@@ -1210,7 +1228,10 @@ function renderCarteira() {
   return `
     <div class="kpis">
       <div class="kpi"><small>Investido</small><span class="num">${R(c.investido)}</span></div>
-      <div class="kpi"><small>Valor hoje</small><span class="num">${R(c.valorAtual)}</span></div>
+      <div class="kpi"><small>Valor hoje</small><span class="num">${R(c.valorAtual)}</span>${(() => {
+        const lq = liquidando();
+        return lq.xs.length ? `<small class="kpi-extra">No banco agora: <b>${R(c.valorAtual - lq.valor)}</b> · ${R(lq.valor)} entra em ${dataBR(lq.ate).slice(0, 5)}</small>` : '';
+      })()}</div>
       <div class="kpi"><small>Resultado</small><span class="num ${cls(c.resultado)}">${R(c.resultado)} <small class="${cls(c.resultado)}">${pct(c.investido ? c.resultado / c.investido : null)}</small></span>${c.realizado ? `<small class="kpi-extra">Vendas: <b class="${cls(c.realizado)}">${c.realizado > 0 ? '+' : ''}${R(c.realizado)}</b></small>` : ''}</div>
       <div class="kpi"><small>Proventos recebidos</small><span class="num">${R(c.proventos)}</span></div>
     </div>
@@ -1258,12 +1279,14 @@ function htmlCardCompra(x) {
   const tes = x.tipo === 'tesouro';
   const total = x.qtd * x.preco + (x.custo || 0);
   const quando = x.importado ? `${nomeMesAno(mesDe(x.data))} · da planilha` : `${dataBR(x.data)} · ${esc(banco(x.banco)?.nome || x.banco || '')}`;
+  const liq = dataLiquidacao(x);
+  const pendente = liq > hojeISO() ? `<span class="cc-tag cc-liq" title="A B3 liquida a compra em dois dias úteis; até lá ela não aparece na custódia do banco">em liquidação · entra ${dataBR(liq).slice(0, 5)}</span>` : '';
   return `<div class="card-compra" role="button" tabindex="0" data-edit-compra="${x.id}" aria-label="Editar compra de ${esc(x.ticker)}, ${dataBR(x.data)}">
     ${htmlLogo({ ticker: x.ticker, tipo: x.tipo })}
     <div class="cc-info">
       <div class="cc-linha"><b class="cc-ticker">${esc(x.ticker)}</b><span class="cc-total num">${R(total)}</span></div>
       <div class="cc-linha cc-sub"><span>${fmtQtd(x.qtd)} ${tes ? (x.qtd === 1 ? 'título' : 'títulos') : (x.qtd === 1 ? 'cota' : 'cotas')} × ${R(x.preco)}</span>${Number(x.custo) > 0 ? `<span class="cc-taxa">taxa ${R(x.custo)}</span>` : ''}</div>
-      <div class="cc-linha cc-rodape"><small>${quando}${x.importado ? ' <span class="cc-tag">estimada</span>' : ''}</small>
+      <div class="cc-linha cc-rodape"><small>${quando}${x.importado ? ' <span class="cc-tag">estimada</span>' : ''} ${pendente}</small>
         <span class="cc-acoes">
           <button type="button" class="ic-btn" data-edit-compra="${x.id}" title="Editar" aria-label="Editar compra de ${esc(x.ticker)}">${ICONE_EDITAR}</button>
           <button type="button" class="ic-btn perigo" data-del-compra="${x.id}" title="Remover" aria-label="Remover compra de ${esc(x.ticker)}">${ICONE_LIXO}</button>

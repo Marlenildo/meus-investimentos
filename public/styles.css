@@ -763,3 +763,5 @@ html, body { overflow-x: clip; }
 .conta-liq b { font-size: 1.1rem; }
 .pos-liq { color: var(--tinta-3); }
 @media (max-width: 520px) { .liq-desc { text-align: left; } }
+.cc-liq { background: var(--acento-suave); color: var(--violeta); }
+.cc-rodape small { white-space: normal; }

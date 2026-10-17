@@ -113,21 +113,67 @@ export function proventosPorTipo(proventos, filtro = () => true) {
 }
 
 // ---------- carteira ----------
+// Cada registro é uma operação: lado 'C' (compra, padrão), 'V' (venda), 'B' (bonificação, sem custo)
+// ou 'A' (ajuste de cotas sem dinheiro: incorporação, grupamento; a quantidade pode ser negativa).
+// O preço médio segue a regra da Receita: compras e bonificações entram no médio; venda não muda o médio;
+// num ajuste o custo total fica o mesmo e só a quantidade muda.
+export const ladoDe = (c) => (['V', 'B', 'A'].includes(c.lado) ? c.lado : 'C');
+const semDinheiro = (lado) => lado === 'B' || lado === 'A';
+const ordemCron = (xs) => [...xs].sort((a, b) => String(a.data).localeCompare(String(b.data)) || (ladoDe(a) === 'V') - (ladoDe(b) === 'V'));
+
+/** Para cada venda: custo das cotas vendidas pelo preço médio do dia e o resultado. */
+export function processarOperacoes(compras) {
+  const pos = new Map();
+  const vendas = new Map();
+  for (const c of ordemCron(compras)) {
+    const p = pos.get(c.ticker) || { qtd: 0, investido: 0 };
+    const qtd = Number(c.qtd) || 0;
+    const lado = ladoDe(c);
+    if (lado === 'C') { p.qtd += qtd; p.investido += qtd * Number(c.preco) + Number(c.custo || 0); }
+    else if (semDinheiro(lado)) p.qtd = Math.max(0, p.qtd + qtd);
+    else {
+      const pm = p.qtd > 0 ? p.investido / p.qtd : 0;
+      const q = Math.min(qtd, p.qtd);
+      const custoBase = q * pm;
+      const recebido = qtd * Number(c.preco) - Number(c.custo || 0);
+      vendas.set(c.id, { custoBase: round2(custoBase), recebido: round2(recebido), resultado: round2(recebido - custoBase), precoMedio: round2(pm) });
+      p.qtd = Math.max(0, p.qtd - qtd);
+      p.investido = p.qtd > 1e-9 ? p.investido - custoBase : 0;
+    }
+    pos.set(c.ticker, p);
+  }
+  return vendas;
+}
+
 export function carteira(compras, ativos, proventos) {
   const porTicker = new Map();
-  for (const c of compras) {
+  const vendas = processarOperacoes(compras);
+  let realizado = 0;
+  for (const c of ordemCron(compras)) {
     const k = c.ticker;
-    const pos = porTicker.get(k) || { ticker: k, tipo: c.tipo, qtd: 0, investido: 0, custos: 0, proventos: 0 };
-    pos.qtd = round2(pos.qtd + Number(c.qtd));
-    pos.investido = round2(pos.investido + Number(c.qtd) * Number(c.preco) + Number(c.custo || 0));
-    pos.custos = round2(pos.custos + Number(c.custo || 0));
+    const pos = porTicker.get(k) || { ticker: k, tipo: c.tipo, qtd: 0, investido: 0, custos: 0, proventos: 0, realizado: 0 };
+    const lado = ladoDe(c);
+    if (lado === 'C') {
+      pos.qtd = round2(pos.qtd + Number(c.qtd));
+      pos.investido = round2(pos.investido + Number(c.qtd) * Number(c.preco) + Number(c.custo || 0));
+      pos.custos = round2(pos.custos + Number(c.custo || 0));
+    } else if (semDinheiro(lado)) {
+      pos.qtd = round2(Math.max(0, pos.qtd + Number(c.qtd)));
+    } else {
+      const v = vendas.get(c.id);
+      pos.qtd = round2(Math.max(0, pos.qtd - Number(c.qtd)));
+      pos.investido = pos.qtd > 0 ? round2(pos.investido - v.custoBase) : 0;
+      pos.realizado = round2(pos.realizado + v.resultado);
+      realizado += v.resultado;
+    }
     porTicker.set(k, pos);
   }
   for (const p of proventos) {
     const pos = porTicker.get(p.ticker);
     if (pos) pos.proventos = round2(pos.proventos + Number(p.valor || 0));
   }
-  const linhas = [...porTicker.values()].map((pos) => {
+  // ativos vendidos por inteiro saem da carteira (o resultado deles fica em `realizado`)
+  const linhas = [...porTicker.values()].filter((pos) => pos.qtd > 0).map((pos) => {
     const ativo = ativos.find((a) => a.ticker === pos.ticker);
     const preco = ativo ? Number(ativo.preco) || 0 : 0;
     const valorAtual = preco ? round2(pos.qtd * preco) : null;
@@ -145,12 +191,13 @@ export function carteira(compras, ativos, proventos) {
   const investido = round2(linhas.reduce((s, l) => s + l.investido, 0));
   const valorAtual = round2(linhas.reduce((s, l) => s + (l.valorAtual ?? l.investido), 0));
   const totalProventos = round2(proventos.reduce((s, p) => s + Number(p.valor || 0), 0));
-  return { linhas, investido, valorAtual, resultado: round2(valorAtual - investido), proventos: totalProventos };
+  return { linhas, investido, valorAtual, resultado: round2(valorAtual - investido), realizado: round2(realizado), proventos: totalProventos };
 }
 
 export function aportesPorMes(compras) {
   const m = new Map();
   for (const c of compras) {
+    if (ladoDe(c) !== 'C') continue;
     const k = mesDe(c.data);
     m.set(k, round2((m.get(k) || 0) + Number(c.qtd) * Number(c.preco) + Number(c.custo || 0)));
   }
@@ -172,11 +219,22 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
     if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 } });
     return m.get(k);
   };
+  const vendas = processarOperacoes(compras);
   for (const c of compras) {
-    const custo = Number(c.custo || 0);
-    const v = Number(c.qtd) * Number(c.preco) + custo;
+    const lado = ladoDe(c);
+    if (semDinheiro(lado)) continue; // bonificação e ajuste não são dinheiro investido
     const l = linha(chave(c.data));
     const grupo = c.tipo === 'acao' || c.tipo === 'fii' || c.tipo === 'tesouro' ? c.tipo : 'outros';
+    if (lado === 'V') {
+      // a venda tira da conta o que aquelas cotas custaram (pelo preço médio)
+      const base = vendas.get(c.id)?.custoBase || 0;
+      l[grupo] -= base;
+      l.total -= base;
+      l.vendas = (l.vendas || 0) + 1;
+      continue;
+    }
+    const custo = Number(c.custo || 0);
+    const v = Number(c.qtd) * Number(c.preco) + custo;
     l[grupo] += v;
     l.tx[grupo] += custo; // taxas por tipo, para o gráfico poder mostrar o valor com ou sem elas
     l.total += v;

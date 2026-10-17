@@ -636,3 +636,11 @@ html, body { overflow-x: clip; }
 .sel-painel.folha .cal-dia { min-height: 42px; font-size: 0.95rem; }
 .sel-fundo.visivel:has(+ .sel-painel.folha) { background: rgba(5, 6, 10, 0.4); transition: background 0.15s ease; }
 @media (prefers-reduced-motion: reduce) { .sel-painel, .sel-btn svg { transition: none; } }
+
+/* vendas, bonificações e ajustes na lista de operações */
+.cc-tit { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.cc-op { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; background: var(--folha); color: var(--tinta-2); box-shadow: inset 0 0 0 1px var(--linha); }
+.op-venda .cc-op { background: rgba(208, 56, 75, 0.12); color: var(--baixa); box-shadow: none; }
+.op-bonus .cc-op { background: var(--acento-suave); color: var(--violeta); box-shadow: none; }
+.cc-res { font-size: 0.82rem; font-weight: 600; white-space: nowrap; }
+.kpi-extra { display: block; margin-top: 4px; font-size: 0.72rem !important; text-transform: none !important; letter-spacing: 0 !important; font-weight: 500 !important; }

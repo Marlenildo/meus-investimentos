@@ -1,6 +1,6 @@
 import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
-  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, estimarCompra, fatoresDoMes, precoTesouroEm,
+  mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, estimarCompra, fatoresDoMes, precoTesouroEm,
 } from './calc.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
@@ -631,12 +631,17 @@ function precoNoMes(ticker, tipo, ym) {
 /** Quanto a carteira valia no fim do mês `ym`, por tipo. Sem preço, vale o que custou. */
 function mercadoAte(ym) {
   const pos = new Map();
+  const vendas = processarOperacoes(S.compras);
   for (const c of S.compras) {
     if (mesDe(c.data) > ym) continue;
     const p = pos.get(c.ticker) || { tipo: c.tipo, qtd: 0, custo: 0 };
-    p.qtd += Number(c.qtd); p.custo += Number(c.qtd) * Number(c.preco) + Number(c.custo || 0);
+    const lado = ladoDe(c);
+    if (lado === 'V') { p.qtd -= Number(c.qtd); p.custo -= vendas.get(c.id)?.custoBase || 0; }
+    else if (lado === 'B' || lado === 'A') p.qtd += Number(c.qtd);
+    else { p.qtd += Number(c.qtd); p.custo += Number(c.qtd) * Number(c.preco) + Number(c.custo || 0); }
     pos.set(c.ticker, p);
   }
+  for (const [t, p] of pos) if (p.qtd <= 1e-9) pos.delete(t);
   const porTipo = { acao: 0, fii: 0, outros: 0, tesouro: 0 };
   for (const [t, p] of pos) {
     const grupo = ['acao', 'fii', 'tesouro'].includes(p.tipo) ? p.tipo : 'outros';
@@ -821,6 +826,8 @@ window.addEventListener('resize', () => { clearTimeout(redimT); redimT = setTime
 function ligarHistorico() {
   ligarRemover('data-del-compra', 'compras');
   $('#conteudo').addEventListener('click', (e) => {
+    const nova = e.target.closest('[data-nova-op]');
+    if (nova) { abrirEditarCompra(null, nova.dataset.novaOp); return; }
     if (e.target.closest('[data-del-compra]')) return; // a lixeira não abre o editor
     const b = e.target.closest('[data-edit-compra]');
     if (b) abrirEditarCompra(b.dataset.editCompra);
@@ -851,94 +858,155 @@ async function precoNoDia(ticker, dia) {
   return j;
 }
 
-function abrirEditarCompra(id) {
-  const c = S.compras.find((x) => x.id === id);
-  if (!c) return;
-  const ativo = S.ativos.find((a) => a.ticker === c.ticker) || { ticker: c.ticker, tipo: c.tipo };
-  const tes = c.tipo === 'tesouro';
-  const temHistorico = N.nuvem.servidor && !tes;
+const ROTULO_LADO = { C: 'Compra', V: 'Venda', B: 'Bonificação', A: 'Ajuste de cotas' };
+
+/** Edita uma operação existente, ou cria uma nova quando `nova` traz o lado ('C' | 'V' | 'B'). */
+function abrirEditarCompra(id, nova) {
+  const existente = S.compras.find((x) => x.id === id);
+  if (!existente && !nova) return;
+  const posAtual = carteira(S.compras, S.ativos, S.proventos).linhas;
+  const tipoDeLinha = (t) => posAtual.find((l) => l.ticker === t)?.tipo;
+  const tickersPos = posAtual.map((l) => l.ticker).sort((a, b) => (tipoDeLinha(a) === 'tesouro') - (tipoDeLinha(b) === 'tesouro') || a.localeCompare(b));
+  const todos = [...new Set([...tickersPos, ...S.ativos.map((a) => a.ticker), ...S.compras.map((x) => x.ticker)])];
+  const c = existente || {
+    id: uid(), data: hojeISO(), lado: nova,
+    ticker: (nova === 'V' ? tickersPos[0] : S.ativos[0]?.ticker) || todos[0] || '',
+    qtd: '', preco: '', custo: 0, banco: banco().id,
+  };
+  const tipoDe = (t) => S.ativos.find((a) => a.ticker === t)?.tipo || S.compras.find((x) => x.ticker === t)?.tipo || adivinharTipo(t);
   const bancoAtual = S.bancos.some((b) => b.id === c.banco) ? c.banco : banco().id;
+  const lado0 = ladoDe(c);
+  const opcoesTicker = (lado) => (lado === 'V' && !existente ? tickersPos : todos);
   const dlg = $('#dlg-compra');
   dlg.innerHTML = `
     <form method="dialog" id="form-edit" class="form-edit">
-      <h2>Editar compra de ${esc(c.ticker)}</h2>
-      ${c.importado ? '<p class="dica">Veio da planilha com a quantidade estimada. Corrigindo aqui, ela passa a valer como compra exata.</p>' : ''}
+      <h2 id="ed-tit"></h2>
+      ${c.importado ? '<p class="dica">Veio da planilha com a quantidade estimada. Corrigindo aqui, ela passa a valer como exata.</p>' : ''}
       <div class="campos dois">
-        <label class="campo"><span>Data da compra</span><input type="date" id="ed-data" value="${esc(c.data)}" max="${hojeISO()}" required><small class="sub"></small></label>
+        <label class="campo"><span>Operação</span><select id="ed-lado">${Object.entries(ROTULO_LADO).map(([k, v]) => `<option value="${k}" ${k === lado0 ? 'selected' : ''}>${v}</option>`).join('')}</select><small class="sub"></small></label>
+        <label class="campo"><span>Ativo</span><select id="ed-ticker" ${existente ? 'disabled' : ''}>${opcoesTicker(lado0).map((t) => `<option ${t === c.ticker ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select><small class="sub" id="ed-pos"></small></label>
+        <label class="campo"><span id="ed-rot-data">Data</span><input type="date" id="ed-data" value="${esc(c.data)}" max="${hojeISO()}" required><small class="sub"></small></label>
         <label class="campo"><span>Banco</span><select id="ed-banco">${S.bancos.map((bk) => `<option value="${bk.id}" ${bk.id === bancoAtual ? 'selected' : ''}>${esc(bk.nome)}</option>`).join('')}</select><small class="sub"></small></label>
-        <label class="campo"><span>${tes ? 'Títulos' : 'Cotas'}</span><input class="num" id="ed-qtd" inputmode="decimal" value="${fmtQtd(c.qtd)}" required><small class="sub"></small></label>
-        <label class="campo"><span>Preço pago por ${tes ? 'título' : 'cota'}</span><input class="num" id="ed-preco" inputmode="decimal" value="${fmtValor(c.preco)}" required><small class="sub" id="ed-dia">${temHistorico ? 'buscando o preço do dia…' : tes ? 'Tesouro: confira no extrato do banco.' : ''}</small></label>
-        <label class="campo"><span>Taxas</span><input class="num" id="ed-custo" inputmode="decimal" value="${fmtValor(c.custo || 0)}"><small class="sub"><button type="button" id="ed-recalc">calcular pelo banco</button></small></label>
-        <div class="campo"><span>Total</span><div class="disp-valor num" id="ed-total"></div><small class="sub"></small></div>
+        <label class="campo"><span id="ed-rot-qtd">Cotas</span><input class="num" id="ed-qtd" inputmode="decimal" value="${c.qtd === '' ? '' : fmtQtd(c.qtd)}" placeholder="0" required><small class="sub"></small></label>
+        <label class="campo" id="ed-c-preco"><span id="ed-rot-preco">Preço por cota</span><input class="num" id="ed-preco" inputmode="decimal" value="${c.preco === '' ? '' : fmtValor(c.preco)}" placeholder="0,00"><small class="sub" id="ed-dia"></small></label>
+        <label class="campo" id="ed-c-custo"><span>Taxas</span><input class="num" id="ed-custo" inputmode="decimal" value="${fmtValor(c.custo || 0)}"><small class="sub"><button type="button" id="ed-recalc">calcular pelo banco</button></small></label>
+        <div class="campo" id="ed-c-total"><span id="ed-rot-total">Total</span><div class="disp-valor num" id="ed-total"></div><small class="sub" id="ed-res"></small></div>
       </div>
       <p class="dica erro-campo" id="ed-erro" hidden></p>
       <div class="acoes"><span class="esp"></span><button class="btn" value="cancelar" formnovalidate>Cancelar</button><button class="btn prim" value="ok">Salvar</button></div>
     </form>`;
 
+  const lado = () => $('#ed-lado').value;
+  const ticker = () => $('#ed-ticker').value;
+  const tipo = () => (existente ? c.tipo : tipoDe(ticker()));
+  const ativoAtual = () => S.ativos.find((a) => a.ticker === ticker()) || { ticker: ticker(), tipo: tipo() };
   const ler = () => {
-    const qtd = normalizaQtd(ativo, num($('#ed-qtd').value));
-    const preco = num($('#ed-preco').value);
-    const custo = num($('#ed-custo').value);
+    const bruto = num($('#ed-qtd').value);
+    const sinal = lado() === 'A' && bruto < 0 ? -1 : 1;
+    const qtd = sinal * normalizaQtd(ativoAtual(), Math.abs(bruto));
+    const semValor = lado() === 'B' || lado() === 'A';
+    const preco = semValor ? 0 : num($('#ed-preco').value);
+    const custo = semValor ? 0 : num($('#ed-custo').value || 0);
     return { qtd, preco, custo: Number.isFinite(custo) && custo >= 0 ? round2(custo) : NaN };
   };
-  const total = () => {
+  /** Posição antes desta operação (sem contar ela mesma), para a venda mostrar o preço médio e o resultado. */
+  const posicaoSem = () => {
+    const outras = S.compras.filter((x) => x.id !== c.id && x.ticker === ticker() && x.data <= $('#ed-data').value);
+    return carteira(outras, [], []).linhas[0] || { qtd: 0, investido: 0, precoMedio: 0 };
+  };
+  const pintar = () => {
+    const l = lado(), tes = tipo() === 'tesouro';
+    const un = tes ? 'títulos' : 'cotas', un1 = tes ? 'título' : 'cota';
+    $('#ed-tit').textContent = `${existente ? 'Editar' : 'Registrar'} ${ROTULO_LADO[l].toLowerCase()}${existente ? ` de ${c.ticker}` : ''}`;
+    $('#ed-rot-data').textContent = l === 'B' || l === 'A' ? 'Data do crédito' : `Data da ${ROTULO_LADO[l].toLowerCase()}`;
+    $('#ed-rot-qtd').textContent = l === 'B' ? `${tes ? 'Títulos' : 'Cotas'} recebidas` : l === 'A' ? 'Cotas a mais (+) ou a menos (−)' : tes ? 'Títulos' : 'Cotas';
+    $('#ed-rot-preco').textContent = l === 'V' ? `Preço de venda por ${un1}` : `Preço pago por ${un1}`;
+    $('#ed-rot-total').textContent = l === 'V' ? 'Você recebe' : 'Total';
+    for (const k of ['#ed-c-preco', '#ed-c-custo', '#ed-c-total']) $(k).hidden = l === 'B' || l === 'A';
+    const pos = posicaoSem();
+    $('#ed-pos').textContent = pos.qtd ? `você tinha ${fmtQtd(pos.qtd)} ${pos.qtd === 1 ? un1 : un}` : '';
     const { qtd, preco, custo } = ler();
     const ok = qtd > 0 && preco > 0 && Number.isFinite(custo);
-    $('#ed-total').textContent = ok ? R(qtd * preco + custo) : '—';
+    $('#ed-total').textContent = ok ? R(l === 'V' ? qtd * preco - custo : qtd * preco + custo) : '—';
+    const res = $('#ed-res');
+    res.textContent = '';
+    res.className = 'sub';
+    if (l === 'V' && ok && pos.qtd && qtd <= pos.qtd + 1e-9) {
+      const r = qtd * preco - custo - Math.min(qtd, pos.qtd) * (pos.investido / pos.qtd);
+      res.textContent = `${r >= 0 ? 'lucro' : 'prejuízo'} de ${R(Math.abs(r))} (médio ${R(pos.investido / pos.qtd)})`;
+      res.classList.add(r >= 0 ? 'var-alta' : 'var-baixa');
+    }
   };
   const recalcular = () => {
     const { qtd, preco } = ler();
     if (!(qtd > 0 && preco > 0)) return;
-    const custo = linhaPlano({ ...ativo, tipo: c.tipo, preco }, qtd, banco($('#ed-banco').value)).custo;
+    const custo = linhaPlano({ ...ativoAtual(), tipo: tipo(), preco }, qtd, banco($('#ed-banco').value)).custo;
     $('#ed-custo').value = fmtValor(custo);
-    total();
+    pintar();
   };
 
   // preço do pregão na data escolhida, com atalho para usar o fechamento
   let pedido = 0;
   const buscarDia = async () => {
-    if (!temHistorico) return;
-    const dia = $('#ed-data').value;
     const box = $('#ed-dia');
-    if (!dia) { box.textContent = ''; return; }
+    const dia = $('#ed-data').value;
+    if (lado() === 'B' || lado() === 'A') { box.textContent = ''; return; }
+    if (tipo() === 'tesouro') { box.textContent = 'Tesouro: confira no extrato do banco.'; return; }
+    if (!N.nuvem.servidor || !dia || !ticker()) { box.textContent = ''; return; }
     const meu = ++pedido;
     box.textContent = 'buscando o preço do dia…';
-    const j = await precoNoDia(c.ticker, dia);
+    const j = await precoNoDia(ticker(), dia);
     if (meu !== pedido || !dlg.open) return;
     if (j.erro || !j.fechamento) { box.textContent = 'Não achei o preço desse dia.'; return; }
     const outroDia = j.data !== dia ? ` (pregão de ${dataBR(j.data)})` : '';
     const faixa = j.minima && j.maxima ? `entre ${R(j.minima)} e ${R(j.maxima)}` : '';
     box.innerHTML = `Fechou a ${R(j.fechamento)}${outroDia}${faixa ? `, ${faixa}` : ''} · <button type="button" id="ed-usar">usar</button>`;
-    $('#ed-usar').onclick = () => { $('#ed-preco').value = fmtValor(j.fechamento); total(); };
+    $('#ed-usar').onclick = () => { $('#ed-preco').value = fmtValor(j.fechamento); pintar(); };
   };
 
   dlg.oninput = (e) => {
-    if (e.target.id === 'ed-data') buscarDia();
-    total();
+    if (e.target.id === 'ed-data' || e.target.id === 'ed-ticker') buscarDia();
+    pintar();
   };
-  dlg.onchange = (e) => { if (e.target.id === 'ed-data') buscarDia(); };
+  dlg.onchange = (e) => {
+    if (e.target.id === 'ed-lado' && !existente) {
+      // venda nova só oferece o que você tem em carteira
+      const atual = ticker();
+      const lista = opcoesTicker(lado());
+      $('#ed-ticker').innerHTML = lista.map((t) => `<option ${t === atual ? 'selected' : ''}>${esc(t)}</option>`).join('');
+    }
+    if (['ed-lado', 'ed-data', 'ed-ticker'].includes(e.target.id)) buscarDia();
+    pintar();
+  };
   $('#ed-recalc').onclick = recalcular;
   $('#form-edit').addEventListener('submit', (e) => {
     if (e.submitter?.value !== 'ok') return;
     const { qtd, preco, custo } = ler();
     const data = $('#ed-data').value;
-    const msg = !/^\d{4}-\d{2}-\d{2}$/.test(data) ? 'Escolha a data.'
-      : !(qtd > 0) ? `Informe ${tes ? 'quantos títulos' : 'quantas cotas'}.`
-      : !(preco > 0) ? 'Informe o preço pago.'
-      : !Number.isFinite(custo) ? 'Taxa inválida.' : '';
+    const l = lado();
+    const pos = posicaoSem();
+    const msg = !ticker() ? 'Escolha o ativo.'
+      : !/^\d{4}-\d{2}-\d{2}$/.test(data) ? 'Escolha a data.'
+      : l === 'A' ? (!qtd ? 'Informe quantas cotas a mais ou a menos.' : qtd < 0 && -qtd > pos.qtd + 1e-9 ? `Nessa data você tinha só ${fmtQtd(pos.qtd)}.` : '')
+      : !(qtd > 0) ? 'Informe a quantidade.'
+      : l !== 'B' && !(preco > 0) ? `Informe o preço ${l === 'V' ? 'de venda' : 'pago'}.`
+      : !Number.isFinite(custo) ? 'Taxa inválida.'
+      : l === 'V' && qtd > pos.qtd + 1e-9 ? `Nessa data você tinha só ${fmtQtd(pos.qtd)}.` : '';
     if (msg) { e.preventDefault(); const er = $('#ed-erro'); er.textContent = msg; er.hidden = false; }
   });
   dlg.onclose = () => {
     if (dlg.returnValue !== 'ok') return;
     const { qtd, preco, custo } = ler();
-    const nova = { id: c.id, data: $('#ed-data').value, ticker: c.ticker, tipo: c.tipo, qtd, preco, custo, banco: $('#ed-banco').value };
-    S.compras = S.compras.map((x) => (x.id === c.id ? nova : x));
-    N.adicionarCompras([nova]); // a nuvem grava por cima da mesma compra
+    const l = lado();
+    const nova = { id: c.id, data: $('#ed-data').value, ticker: ticker(), tipo: tipo(), qtd, preco, custo, banco: $('#ed-banco').value };
+    if (l !== 'C') nova.lado = l;
+    S.compras = existente ? S.compras.map((x) => (x.id === c.id ? nova : x)) : [...S.compras, nova];
+    N.adicionarCompras([nova]); // a nuvem grava por cima do mesmo registro
     persist();
-    toast('Compra corrigida.');
+    toast(existente ? 'Operação corrigida.' : `${ROTULO_LADO[l]} registrada.`);
     render();
   };
-  total();
+  pintar();
   dlg.returnValue = '';
   dlg.showModal();
   buscarDia();
@@ -955,13 +1023,14 @@ function renderCarteira() {
     return `<section class="bloco"><div class="vazio"><h2>Sua carteira aparece aqui</h2><p>Depois de comprar no banco, toque em <b>Comprei — registrar</b> na tela inicial. Aqui você vê cotas, preço médio, quanto investiu e o retorno.</p><a class="btn prim" href="#comprar">Ir para Comprar</a></div></section>`;
   }
   const c = carteira(S.compras, S.ativos, S.proventos);
+  VENDAS = processarOperacoes(S.compras);
   const cls = (v) => (v == null ? '' : v >= 0 ? 'var-alta' : 'var-baixa');
   const porMes = groupBy([...S.compras].sort((a, b) => b.data.localeCompare(a.data)), (x) => mesDe(x.data));
   return `
     <div class="kpis">
       <div class="kpi"><small>Investido</small><span class="num">${R(c.investido)}</span></div>
       <div class="kpi"><small>Valor hoje</small><span class="num">${R(c.valorAtual)}</span></div>
-      <div class="kpi"><small>Resultado</small><span class="num ${cls(c.resultado)}">${R(c.resultado)} <small class="${cls(c.resultado)}">${pct(c.investido ? c.resultado / c.investido : null)}</small></span></div>
+      <div class="kpi"><small>Resultado</small><span class="num ${cls(c.resultado)}">${R(c.resultado)} <small class="${cls(c.resultado)}">${pct(c.investido ? c.resultado / c.investido : null)}</small></span>${c.realizado ? `<small class="kpi-extra">Vendas: <b class="${cls(c.realizado)}">${c.realizado > 0 ? '+' : ''}${R(c.realizado)}</b></small>` : ''}</div>
       <div class="kpi"><small>Proventos recebidos</small><span class="num">${R(c.proventos)}</span></div>
     </div>
 
@@ -969,10 +1038,11 @@ function renderCarteira() {
 
 
     <section class="bloco">
-      <h2>Compras</h2>
+      <div class="bloco-cab"><h2>Operações</h2>
+        <div class="acoes"><button type="button" class="btn peq" data-nova-op="V">Registrar venda</button><button type="button" class="btn peq" data-nova-op="C">Compra antiga</button></div></div>
       ${[...porMes.entries()].map(([mes, xs], i) => `
         <details class="mes-grupo" ${i === 0 ? 'open' : ''}>
-          <summary class="mes-cab"><span>${nomeMesAno(mes).replace(/^./, (c) => c.toUpperCase())}</span><span class="num">${R(xs.reduce((s, x) => s + x.qtd * x.preco + (x.custo || 0), 0))}</span></summary>
+          <summary class="mes-cab"><span>${nomeMesAno(mes).replace(/^./, (c) => c.toUpperCase())}</span><span class="num">${R(xs.filter((x) => ladoDe(x) === 'C').reduce((s, x) => s + x.qtd * x.preco + (x.custo || 0), 0))}</span></summary>
           <div class="compras-lista">${xs.map(htmlCardCompra).join('')}</div>
         </details>`).join('')}
     </section>`;
@@ -982,7 +1052,12 @@ const ICONE_EDITAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
 const ICONE_LIXO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>';
 
 /** Uma compra como card: toque em qualquer lugar para editar; lixeira pede confirmação. */
+let VENDAS = new Map(); // resultado de cada venda, recalculado a cada desenho da lista
+const unidade = (tipo, q) => (tipo === 'tesouro' ? (q === 1 ? 'título' : 'títulos') : q === 1 ? 'cota' : 'cotas');
+
 function htmlCardCompra(x) {
+  const lado = ladoDe(x);
+  if (lado !== 'C') return htmlCardOperacao(x, lado);
   const tes = x.tipo === 'tesouro';
   const total = x.qtd * x.preco + (x.custo || 0);
   const quando = x.importado ? `${nomeMesAno(mesDe(x.data))} · da planilha` : `${dataBR(x.data)} · ${esc(banco(x.banco)?.nome || x.banco || '')}`;
@@ -995,6 +1070,28 @@ function htmlCardCompra(x) {
         <span class="cc-acoes">
           <button type="button" class="ic-btn" data-edit-compra="${x.id}" title="Editar" aria-label="Editar compra de ${esc(x.ticker)}">${ICONE_EDITAR}</button>
           <button type="button" class="ic-btn perigo" data-del-compra="${x.id}" title="Remover" aria-label="Remover compra de ${esc(x.ticker)}">${ICONE_LIXO}</button>
+        </span>
+      </div>
+    </div>
+  </div>`;
+}
+
+/** Venda ou bonificação: mesmo card, com etiqueta e o que muda. */
+function htmlCardOperacao(x, lado) {
+  const v = VENDAS.get(x.id);
+  const venda = lado === 'V';
+  const cor = v ? (v.resultado >= 0 ? 'var-alta' : 'var-baixa') : '';
+  const nome = venda ? 'Venda' : lado === 'A' ? 'Ajuste' : 'Bonificação';
+  const sinal = Number(x.qtd) < 0 ? '−' : '+';
+  return `<div class="card-compra ${venda ? 'op-venda' : 'op-bonus'}" role="button" tabindex="0" data-edit-compra="${x.id}" aria-label="Editar ${nome.toLowerCase()} de ${esc(x.ticker)}, ${dataBR(x.data)}">
+    ${htmlLogo({ ticker: x.ticker, tipo: x.tipo })}
+    <div class="cc-info">
+      <div class="cc-linha"><span class="cc-tit"><b class="cc-ticker">${esc(x.ticker)}</b><span class="cc-op">${nome}</span></span><span class="cc-total num">${venda ? R(v?.recebido ?? x.qtd * x.preco) : `${sinal}${fmtQtd(Math.abs(x.qtd))}`}</span></div>
+      <div class="cc-linha cc-sub"><span>${venda ? `−${fmtQtd(x.qtd)} ${unidade(x.tipo, x.qtd)} × ${R(x.preco)}` : lado === 'A' ? `${sinal}${fmtQtd(Math.abs(x.qtd))} ${unidade(x.tipo, Math.abs(x.qtd))}, mesmo valor investido` : `${fmtQtd(x.qtd)} ${unidade(x.tipo, x.qtd)} sem custo`}</span>${venda && v ? `<span class="cc-res ${cor}">${v.resultado >= 0 ? '+' : '−'}${R(Math.abs(v.resultado))}</span>` : ''}</div>
+      <div class="cc-linha cc-rodape"><small>${dataBR(x.data)}${venda && v ? ` · preço médio ${R(v.precoMedio)}` : ''}${x.obs ? ` · ${esc(x.obs)}` : ''}</small>
+        <span class="cc-acoes">
+          <button type="button" class="ic-btn" data-edit-compra="${x.id}" title="Editar" aria-label="Editar">${ICONE_EDITAR}</button>
+          <button type="button" class="ic-btn perigo" data-del-compra="${x.id}" title="Remover" aria-label="Remover">${ICONE_LIXO}</button>
         </span>
       </div>
     </div>
@@ -1534,9 +1631,10 @@ N.aoMudar(renderNuvem);
 /** Todo ativo que você tem em carteira aparece na lista, mesmo se foi tirado dela. */
 function garantirAtivosDaCarteira() {
   const tem = new Set(S.ativos.map((a) => a.ticker));
+  const emCarteira = new Set(carteira(S.compras, [], []).linhas.map((l) => l.ticker)); // vendidos por inteiro não voltam
   let mudou = false;
   for (const c of S.compras) {
-    if (tem.has(c.ticker)) continue;
+    if (tem.has(c.ticker) || !emCarteira.has(c.ticker)) continue;
     S.ativos.push({ id: uid(), ticker: c.ticker, tipo: c.tipo || 'acao', nome: c.tipo === 'tesouro' ? c.ticker : '', preco: null, precoEm: null, fonte: null });
     tem.add(c.ticker); mudou = true;
   }

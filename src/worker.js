@@ -21,6 +21,8 @@ async function garantirSchema(db) {
   await db.batch(SCHEMA.map((s) => db.prepare(s)));
   // colunas novas em bancos criados por versões anteriores
   try { await db.prepare('ALTER TABLE compras ADD COLUMN importado INTEGER DEFAULT 0').run(); } catch { /* já existe */ }
+  // lado: C = compra, V = venda, B = bonificação, A = ajuste de cotas (incorporação, grupamento)
+  try { await db.prepare("ALTER TABLE compras ADD COLUMN lado TEXT DEFAULT 'C'").run(); } catch { /* já existe */ }
   schemaPronto = true;
 }
 
@@ -80,6 +82,7 @@ const compraLimpa = (c) => ({
   id: id(c.id), data: dataISO(c.data), ticker: texto(c.ticker, 60), tipo: TIPOS.has(c.tipo) ? c.tipo : 'acao',
   qtd: numero(c.qtd), preco: numero(c.preco), custo: numero(c.custo || 0), banco: texto(c.banco, 40),
   importado: c.importado ? 1 : 0,
+  lado: ['V', 'B', 'A'].includes(c.lado) ? c.lado : 'C',
 });
 const proventoLimpo = (p) => ({
   id: id(p.id), data: dataISO(p.data), ticker: texto(p.ticker, 60), tipo: texto(p.tipo, 20), valor: numero(p.valor),
@@ -103,7 +106,7 @@ async function lerEstado(db) {
     bancos: config.bancos ?? null,
     plano: config.plano ?? null,
     ativos: ativos.results.map((a) => ({ id: a.id, ticker: a.ticker, tipo: a.tipo, nome: a.nome, preco: a.preco, precoEm: a.preco_em, fonte: a.fonte })),
-    compras: compras.results.map(({ criado_em, importado, ...c }) => (importado ? { ...c, importado: true } : c)),
+    compras: compras.results.map(({ criado_em, importado, lado, ...c }) => ({ ...c, ...(importado ? { importado: true } : {}), ...(lado && lado !== 'C' ? { lado } : {}) })),
     proventos: proventos.results.map(({ criado_em, ...p }) => p),
   };
 }
@@ -122,10 +125,10 @@ function stmtsAtivos(db, lista) {
   ];
 }
 // grava ou corrige uma compra; ao corrigir, mantém quando ela foi criada (a ordem no mesmo dia não muda)
-const stmtCompra = (db, c) => db.prepare(`INSERT INTO compras (id, data, ticker, tipo, qtd, preco, custo, banco, criado_em, importado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+const stmtCompra = (db, c) => db.prepare(`INSERT INTO compras (id, data, ticker, tipo, qtd, preco, custo, banco, criado_em, importado, lado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
   ON CONFLICT(id) DO UPDATE SET data = excluded.data, ticker = excluded.ticker, tipo = excluded.tipo, qtd = excluded.qtd, preco = excluded.preco,
-  custo = excluded.custo, banco = excluded.banco, importado = excluded.importado`)
-  .bind(c.id, c.data, c.ticker, c.tipo, c.qtd, c.preco, c.custo, c.banco, agora(), c.importado);
+  custo = excluded.custo, banco = excluded.banco, importado = excluded.importado, lado = excluded.lado`)
+  .bind(c.id, c.data, c.ticker, c.tipo, c.qtd, c.preco, c.custo, c.banco, agora(), c.importado, c.lado);
 const stmtProvento = (db, p) => db.prepare('INSERT OR REPLACE INTO proventos (id, data, ticker, tipo, valor, criado_em) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
   .bind(p.id, p.data, p.ticker, p.tipo, p.valor, agora());
 

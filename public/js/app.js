@@ -1246,7 +1246,10 @@ function renderNuvem() {
 
 function render() {
   const aba = ABAS[location.hash.slice(1)] ? location.hash.slice(1) : 'comprar';
-  document.querySelectorAll('.abas a').forEach((a) => a.classList.toggle('ativa', a.dataset.aba === aba));
+  document.querySelectorAll('.abas a, .navbar a').forEach((a) => {
+    a.classList.toggle('ativa', a.dataset.aba === aba);
+    if (a.dataset.aba === aba) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
   // troca o <main> para descartar listeners antigos
   const velho = $('#conteudo');
   const novo = velho.cloneNode(false);

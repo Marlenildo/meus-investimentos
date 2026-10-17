@@ -726,3 +726,18 @@ html, body { overflow-x: clip; }
 .pv-tipo-total small { text-align: right; }
 .pv-tipo-total b { order: 3; }
 .pv-tipo-total small { order: 2; }
+
+/* ---------- barras: acabamento ---------- */
+.grafico .seg { stroke: var(--folha); stroke-width: 1.25px; }
+.grafico .slot.sel .seg { stroke: var(--folha-2); }
+.s-tes0 { fill: var(--s-tes); background: var(--s-tes); }
+.s-tes1 { fill: #e6bd63; background: #e6bd63; }
+.s-tes2 { fill: #8f6212; background: #8f6212; }
+.filtros .sw.s-tesouro { background: linear-gradient(90deg, var(--s-tes) 50%, #e6bd63 50%); }
+.grafico .seg-neg { fill: var(--baixa); paint-order: stroke; stroke: var(--folha); stroke-width: 3px; }
+.grafico .seg-inv { fill: #fff; paint-order: stroke; stroke: rgba(0, 0, 0, 0.18); stroke-width: 2px; }
+.grafico .seg-rot { letter-spacing: -0.01em; }
+.grafico .slot .alvo { transition: fill 0.15s ease; }
+.graf-legenda { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.76rem; color: var(--tinta-3); margin-top: -4px; }
+.graf-legenda span { display: inline-flex; align-items: center; gap: 6px; }
+.sw.s-perda-sw { background: repeating-linear-gradient(45deg, var(--baixa) 0 2px, color-mix(in srgb, var(--baixa) 22%, transparent) 2px 4px); }

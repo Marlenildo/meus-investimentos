@@ -226,7 +226,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
   const chave = CHAVE_PERIODO[periodo] || CHAVE_PERIODO.mes;
   const m = new Map();
   const linha = (k) => {
-    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 }, pv: {}, pvc: {} });
+    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 }, pv: {}, pvc: {}, tes: {} });
     return m.get(k);
   };
   const vendas = processarOperacoes(compras);
@@ -240,12 +240,14 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
       const base = vendas.get(c.id)?.custoBase || 0;
       l[grupo] -= base;
       l.total -= base;
+      if (grupo === 'tesouro') l.tes[c.ticker] = (l.tes[c.ticker] || 0) - base;
       l.vendas = (l.vendas || 0) + 1;
       continue;
     }
     const custo = Number(c.custo || 0);
     const v = Number(c.qtd) * Number(c.preco) + custo;
     l[grupo] += v;
+    if (grupo === 'tesouro') l.tes[c.ticker] = (l.tes[c.ticker] || 0) + v; // cada título do Tesouro em separado
     l.tx[grupo] += custo; // taxas por tipo, para o gráfico poder mostrar o valor com ou sem elas
     l.total += v;
     l.compras++;
@@ -271,6 +273,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
         tx: Object.fromEntries(Object.entries(l.tx).map(([k, v]) => [k, round2(v)])),
         pv: Object.fromEntries(Object.entries(l.pv).map(([k, v]) => [k, round2(v)])),
         pvc: Object.fromEntries(Object.entries(l.pvc).map(([k, v]) => [k, round2(v)])),
+        tes: Object.fromEntries(Object.entries(l.tes).map(([k, v]) => [k, round2(v)])),
       };
     });
 }

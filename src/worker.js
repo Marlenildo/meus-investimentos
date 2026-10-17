@@ -2,7 +2,7 @@
 // - Serve o site (pasta public/) e a API em /api/*.
 // - Guarda ativos, compras, proventos e ajustes no D1 (binding DB).
 // - Busca cotações no Yahoo Finance (atraso de ~15 min na B3), com a brapi como reserva.
-// - Os dados exigem a senha definida na variável SENHA; /api/saude, /api/cotacoes e /api/historico são públicos.
+// - Os dados exigem a senha definida na variável SENHA; /api/saude, /api/cotacoes, /api/historico e /api/preco-dia são públicos.
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS config (chave TEXT PRIMARY KEY, valor TEXT NOT NULL, atualizado_em TEXT)`,
@@ -121,7 +121,10 @@ function stmtsAtivos(db, lista) {
       .bind(a.id, a.ticker, a.tipo, a.nome, a.preco, a.preco_em, a.fonte, a.ordem)),
   ];
 }
-const stmtCompra = (db, c) => db.prepare('INSERT OR REPLACE INTO compras (id, data, ticker, tipo, qtd, preco, custo, banco, criado_em, importado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)')
+// grava ou corrige uma compra; ao corrigir, mantém quando ela foi criada (a ordem no mesmo dia não muda)
+const stmtCompra = (db, c) => db.prepare(`INSERT INTO compras (id, data, ticker, tipo, qtd, preco, custo, banco, criado_em, importado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+  ON CONFLICT(id) DO UPDATE SET data = excluded.data, ticker = excluded.ticker, tipo = excluded.tipo, qtd = excluded.qtd, preco = excluded.preco,
+  custo = excluded.custo, banco = excluded.banco, importado = excluded.importado`)
   .bind(c.id, c.data, c.ticker, c.tipo, c.qtd, c.preco, c.custo, c.banco, agora(), c.importado);
 const stmtProvento = (db, p) => db.prepare('INSERT OR REPLACE INTO proventos (id, data, ticker, tipo, valor, criado_em) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
   .bind(p.id, p.data, p.ticker, p.tipo, p.valor, agora());
@@ -203,6 +206,43 @@ async function historicoYahoo(ticker) {
   return { ticker, meses: {}, splits: [], erro: ultimoErro?.message || 'sem histórico' };
 }
 
+/**
+ * Preço de um dia (abertura, mínima, máxima e fechamento). Se a bolsa não abriu nesse dia,
+ * devolve o último pregão antes dele. O Yahoo corrige preços antigos por desdobramentos;
+ * aqui eles voltam ao valor que realmente foi negociado naquele dia.
+ */
+async function precoDoDia(ticker, dia) {
+  const simbolo = `${ticker}.SA`;
+  const alvo = Date.parse(`${dia}T00:00:00-03:00`) / 1000;
+  const p1 = alvo - 12 * 86400, p2 = alvo + 86400;
+  let ultimoErro;
+  for (const host of ['query1', 'query2']) {
+    try {
+      const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?interval=1d&period1=${p1}&period2=${p2}`;
+      const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, cf: { cacheTtl: 3600, cacheEverything: true } });
+      if (r.status === 404) throw new Error('ticker não encontrado');
+      if (!r.ok) throw new Error(`yahoo ${r.status}`);
+      const res = (await r.json())?.chart?.result?.[0];
+      const ts = res?.timestamp || [];
+      const q = res?.indicators?.quote?.[0] || {};
+      let achado = null;
+      ts.forEach((t, i) => {
+        const d = new Date((t - 3 * 3600) * 1000).toISOString().slice(0, 10); // dia em São Paulo
+        if (d <= dia && q.close?.[i] != null) achado = { data: d, i };
+      });
+      if (!achado) throw new Error('sem pregão nessa data');
+      const { splits } = await historicoYahoo(ticker);
+      const fator = splits.filter((x) => x.data > achado.data).reduce((f, x) => f * x.fator, 1);
+      const v = (arr) => (arr?.[achado.i] != null ? Math.round(arr[achado.i] * fator * 100) / 100 : null);
+      return { ticker, data: achado.data, abertura: v(q.open), minima: v(q.low), maxima: v(q.high), fechamento: v(q.close), fonte: 'yahoo' };
+    } catch (e) {
+      ultimoErro = e;
+      if (e.message === 'ticker não encontrado' || e.message === 'sem pregão nessa data') break;
+    }
+  }
+  return { ticker, erro: ultimoErro?.message || 'sem preço nessa data' };
+}
+
 async function cotacoes(tickers, brapiToken) {
   const out = {};
   await Promise.all(tickers.map(async (t) => {
@@ -240,6 +280,15 @@ async function api(req, env, url) {
     const t = (url.searchParams.get('t') || '').trim().toUpperCase();
     if (!/^[A-Z0-9]{4,12}$/.test(t)) return erro(400, 'Informe o código em ?t=BBAS3');
     return json(await historicoYahoo(t));
+  }
+
+  // preço de um dia, para corrigir compras antigas
+  if (caminho === 'preco-dia' && metodo === 'GET') {
+    const t = (url.searchParams.get('t') || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{4,12}$/.test(t)) return erro(400, 'Informe o código em ?t=BBAS3');
+    const dia = dataISO(url.searchParams.get('d'));
+    if (dia > new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10)) return erro(400, 'Essa data ainda não chegou.');
+    return json(await precoDoDia(t, dia));
   }
 
   const negado = await conferirSenha(req, env);

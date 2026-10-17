@@ -557,13 +557,15 @@ const SERIES = [
   { k: 'fii', nome: 'FIIs' },
   { k: 'outros', nome: 'ETF/BDR' },
   { k: 'tesouro', nome: 'Tesouro' },
+  { k: 'taxa', nome: 'Com taxas' },
 ];
 const PILHA = ['acao', 'fii', 'outros', 'tesouro']; // de baixo para cima
 const GRAF_KEY = 'meus-investimentos:grafico';
-const PADRAO_GRAF = { periodo: 'mes', modo: 'periodo', hist: ['prov', 'acao', 'fii', 'outros', 'tesouro', 'mercado'], sel: null };
+const PADRAO_GRAF = { periodo: 'mes', modo: 'periodo', hist: ['prov', 'acao', 'fii', 'outros', 'tesouro', 'taxa', 'mercado'], sel: null };
 let G = (() => { try { return { ...PADRAO_GRAF, ...JSON.parse(localStorage.getItem(GRAF_KEY) || '{}') }; } catch { return { ...PADRAO_GRAF }; } })();
 if (typeof G.sel !== 'number') G.sel = null;
 if (!G.hist.includes('mercado') && !G.semMercado) G.hist.push('mercado');
+if (!G.hist.includes('taxa') && !G.semTaxa) G.hist.push('taxa');
 const salvarG = () => { try { localStorage.setItem(GRAF_KEY, JSON.stringify(G)); } catch { /* sem armazenamento */ } };
 
 const rotuloCurto = (chave, per) => per === 'ano' ? chave : per === 'mes' ? mesCurto(chave) : `${chave.slice(8, 10)}/${chave.slice(5, 7)}`;
@@ -575,7 +577,7 @@ function linhasDoGrafico(per) {
   const ls = resumoPorPeriodo(S.compras, S.proventos, per);
   if (per === 'dia' || !ls.length) return ls;
   const mapa = new Map(ls.map((l) => [l.chave, l]));
-  const vazio = (k) => ({ chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0 });
+  const vazio = (k) => ({ chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 } });
   const out = [];
   const hoje = per === 'ano' ? hojeISO().slice(0, 4) : mesDe(hojeISO());
   let k = ls[0].chave;
@@ -655,15 +657,27 @@ function barra(x, yTopo, w, h, r, cls) {
   return `<path class="${cls}" d="M${x},${yTopo + h}V${yTopo + r}Q${x},${yTopo} ${x + r},${yTopo}H${x + w - r}Q${x + w},${yTopo} ${x + w},${yTopo + r}V${yTopo + h}Z"/>`;
 }
 
+/** Tira as taxas de cada tipo quando o gráfico mostra só o valor dos ativos. */
+const semTaxas = (l) => ({ ...l, ...Object.fromEntries(PILHA.map((k) => [k, Math.max(0, l[k] - (l.tx?.[k] || 0))])) });
+const taxasDe = (l, pilha) => pilha.reduce((s, k) => s + (l.tx?.[k] || 0), 0);
+
 function htmlGrafico(largura) {
   const per = G.periodo;
   const acum = G.modo === 'acumulado';
   let linhas = linhasDoGrafico(per);
   if (acum) {
     const soma = { acao: 0, fii: 0, outros: 0, tesouro: 0, proventos: 0 };
-    linhas = linhas.map((l) => { for (const k of Object.keys(soma)) soma[k] += l[k]; return { ...l, ...soma }; });
+    const tx = { acao: 0, fii: 0, outros: 0, tesouro: 0 };
+    linhas = linhas.map((l) => {
+      for (const k of Object.keys(soma)) soma[k] += l[k];
+      for (const k of Object.keys(tx)) tx[k] += l.tx?.[k] || 0;
+      return { ...l, ...soma, tx: { ...tx } };
+    });
   }
-  const presentes = SERIES.filter((x) => linhas.some((l) => (x.k === 'prov' ? l.proventos : l[x.k]) > 0));
+  const temTaxa = S.compras.some((c) => Number(c.custo) > 0);
+  const presentes = SERIES.filter((x) => (x.k === 'taxa' ? temTaxa : linhas.some((l) => (x.k === 'prov' ? l.proventos : l[x.k]) > 0)));
+  const comTaxa = temTaxa && (G.hist || []).includes('taxa');
+  if (!comTaxa) linhas = linhas.map(semTaxas);
   const podeMerc = acum && per !== 'dia' && S.compras.length > 0;
   if (podeMerc) presentes.push({ k: 'mercado', nome: 'Valor de mercado' });
   const ativos = new Set((G.hist || []).filter((k) => presentes.some((x) => x.k === k)));
@@ -677,8 +691,9 @@ function htmlGrafico(largura) {
     const m = mercadoAte(fimDoPeriodo(l.chave, per));
     return pilha.reduce((s, k) => s + m[k], 0);
   });
-  const brutas = linhasDoGrafico(per);
+  const brutas = linhasDoGrafico(per).map((l) => (comTaxa ? l : semTaxas(l)));
   const totInv = brutas.reduce((s, l) => s + pilha.reduce((t, k) => t + l[k], 0), 0);
+  const totTaxa = comTaxa ? brutas.reduce((s, l) => s + taxasDe(l, pilha), 0) : 0;
   const totProv = comProv ? brutas.reduce((s, l) => s + l.proventos, 0) : 0;
 
   // largura: cabe tudo na tela sempre que possível; só rola quando os períodos não cabem
@@ -738,7 +753,7 @@ function htmlGrafico(largura) {
   const l = linhas[sel];
   const itens = l ? [...pilha.map((k) => [SERIES.find((x) => x.k === k).nome, l[k], k]), ...(comProv ? [['Proventos', l.proventos, 'prov']] : [])].filter(([, v]) => v > 0) : [];
   const detalhe = l ? `
-    <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(l.chave, per)}</b>${pilha.length ? `<span>Investido <b>${R(inv(l))}</b>${merc[sel] != null ? ` · Valia <b>${R(merc[sel])}</b> <span class="${merc[sel] >= inv(l) ? 'var-alta' : 'var-baixa'}">${merc[sel] >= inv(l) ? '+' : '−'}${R(Math.abs(merc[sel] - inv(l)))} (${pct(inv(l) ? merc[sel] / inv(l) - 1 : null)})</span>` : ''}</span>` : ''}</div>
+    <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(l.chave, per)}</b>${pilha.length ? `<span>Investido <b>${R(inv(l))}</b>${comTaxa && taxasDe(l, pilha) > 0 ? ` <span class="apagado">(taxas ${R(taxasDe(l, pilha))})</span>` : ''}${merc[sel] != null ? ` · Valia <b>${R(merc[sel])}</b> <span class="${merc[sel] >= inv(l) ? 'var-alta' : 'var-baixa'}">${merc[sel] >= inv(l) ? '+' : '−'}${R(Math.abs(merc[sel] - inv(l)))} (${pct(inv(l) ? merc[sel] / inv(l) - 1 : null)})</span>` : ''}</span>` : ''}</div>
     ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, k]) => `<span><i class="sw s-${k}"></i>${nome}<b>${R(v)}</b></span>`).join('')}</div>` : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}` : '';
 
   return `
@@ -746,7 +761,7 @@ function htmlGrafico(largura) {
       <div class="graf-topo">
         <div>
           <h2>${acum ? 'Total acumulado' : 'Quanto investi'}</h2>
-          <small class="sub-cab">${pilha.length ? `Investido <b>${R(totInv)}</b>` : ''}${comMerc && HIST && merc[n - 1] != null ? ` · Vale hoje <b>${R(merc[n - 1])}</b> <span class="${merc[n - 1] >= totInv ? 'var-alta' : 'var-baixa'}">${pct(totInv ? merc[n - 1] / totInv - 1 : null)}</span>` : ''}${comMerc && !HIST ? ' · calculando o valor de mercado…' : ''}${pilha.length && comProv ? ' · ' : ''}${comProv ? `Proventos <b>${R(totProv)}</b>` : ''}</small>
+          <small class="sub-cab">${pilha.length ? `Investido <b>${R(totInv)}</b>${totTaxa > 0 ? ` <span class="apagado">(taxas ${R(totTaxa)})</span>` : ''}` : ''}${comMerc && HIST && merc[n - 1] != null ? ` · Vale hoje <b>${R(merc[n - 1])}</b> <span class="${merc[n - 1] >= totInv ? 'var-alta' : 'var-baixa'}">${pct(totInv ? merc[n - 1] / totInv - 1 : null)}</span>` : ''}${comMerc && !HIST ? ' · calculando o valor de mercado…' : ''}${pilha.length && comProv ? ' · ' : ''}${comProv ? `Proventos <b>${R(totProv)}</b>` : ''}</small>
         </div>
         <div class="graf-controles">
           <div class="seg" role="group" aria-label="Mostrar">
@@ -789,9 +804,10 @@ function ligarGrafico() {
     if (t.dataset.grafSerie) {
       const lista = new Set(G.hist);
       lista.has(t.dataset.grafSerie) ? lista.delete(t.dataset.grafSerie) : lista.add(t.dataset.grafSerie);
-      if (!lista.size) return; // sempre fica pelo menos uma série
+      if (![...lista].some((k) => k !== 'taxa')) return; // sempre fica pelo menos uma série
       G.hist = [...lista];
       if (t.dataset.grafSerie === 'mercado') G.semMercado = !lista.has('mercado');
+      if (t.dataset.grafSerie === 'taxa') G.semTaxa = !lista.has('taxa');
     }
     if (t.dataset.grafSlot) G.sel = Number(t.dataset.grafSlot);
     salvarG();
@@ -803,7 +819,121 @@ window.addEventListener('resize', () => { clearTimeout(redimT); redimT = setTime
 
 function ligarHistorico() {
   ligarRemover('data-del-compra', 'compras');
+  $('#conteudo').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-edit-compra]');
+    if (b) abrirEditarCompra(b.dataset.editCompra);
+  });
   ligarGrafico();
+}
+
+// ---------- editar uma compra ----------
+const fmtValor = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+/** Preço do ativo no dia (último pregão até a data), pelo Worker. */
+const precosDoDia = new Map();
+async function precoNoDia(ticker, dia) {
+  const k = `${ticker}|${dia}`;
+  if (!precosDoDia.has(k)) {
+    precosDoDia.set(k, fetch(`/api/preco-dia?t=${encodeURIComponent(ticker)}&d=${dia}`)
+      .then((r) => r.json())
+      .catch(() => ({ erro: 'sem conexão' })));
+  }
+  const j = await precosDoDia.get(k);
+  if (j.erro) precosDoDia.delete(k); // tenta de novo na próxima vez
+  return j;
+}
+
+function abrirEditarCompra(id) {
+  const c = S.compras.find((x) => x.id === id);
+  if (!c) return;
+  const ativo = S.ativos.find((a) => a.ticker === c.ticker) || { ticker: c.ticker, tipo: c.tipo };
+  const tes = c.tipo === 'tesouro';
+  const temHistorico = N.nuvem.servidor && !tes;
+  const bancoAtual = S.bancos.some((b) => b.id === c.banco) ? c.banco : banco().id;
+  const dlg = $('#dlg-compra');
+  dlg.innerHTML = `
+    <form method="dialog" id="form-edit" class="form-edit">
+      <h2>Editar compra de ${esc(c.ticker)}</h2>
+      ${c.importado ? '<p class="dica">Veio da planilha com a quantidade estimada. Corrigindo aqui, ela passa a valer como compra exata.</p>' : ''}
+      <div class="campos dois">
+        <label class="campo"><span>Data da compra</span><input type="date" id="ed-data" value="${esc(c.data)}" max="${hojeISO()}" required><small class="sub"></small></label>
+        <label class="campo"><span>Banco</span><select id="ed-banco">${S.bancos.map((bk) => `<option value="${bk.id}" ${bk.id === bancoAtual ? 'selected' : ''}>${esc(bk.nome)}</option>`).join('')}</select><small class="sub"></small></label>
+        <label class="campo"><span>${tes ? 'Títulos' : 'Cotas'}</span><input class="num" id="ed-qtd" inputmode="decimal" value="${fmtQtd(c.qtd)}" required><small class="sub"></small></label>
+        <label class="campo"><span>Preço pago por ${tes ? 'título' : 'cota'}</span><input class="num" id="ed-preco" inputmode="decimal" value="${fmtValor(c.preco)}" required><small class="sub" id="ed-dia">${temHistorico ? 'buscando o preço do dia…' : tes ? 'Tesouro: confira no extrato do banco.' : ''}</small></label>
+        <label class="campo"><span>Taxas</span><input class="num" id="ed-custo" inputmode="decimal" value="${fmtValor(c.custo || 0)}"><small class="sub"><button type="button" id="ed-recalc">calcular pelo banco</button></small></label>
+        <div class="campo"><span>Total</span><div class="disp-valor num" id="ed-total"></div><small class="sub"></small></div>
+      </div>
+      <p class="dica erro-campo" id="ed-erro" hidden></p>
+      <div class="acoes"><span class="esp"></span><button class="btn" value="cancelar" formnovalidate>Cancelar</button><button class="btn prim" value="ok">Salvar</button></div>
+    </form>`;
+
+  const ler = () => {
+    const qtd = normalizaQtd(ativo, num($('#ed-qtd').value));
+    const preco = num($('#ed-preco').value);
+    const custo = num($('#ed-custo').value);
+    return { qtd, preco, custo: Number.isFinite(custo) && custo >= 0 ? round2(custo) : NaN };
+  };
+  const total = () => {
+    const { qtd, preco, custo } = ler();
+    const ok = qtd > 0 && preco > 0 && Number.isFinite(custo);
+    $('#ed-total').textContent = ok ? R(qtd * preco + custo) : '—';
+  };
+  const recalcular = () => {
+    const { qtd, preco } = ler();
+    if (!(qtd > 0 && preco > 0)) return;
+    const custo = linhaPlano({ ...ativo, tipo: c.tipo, preco }, qtd, banco($('#ed-banco').value)).custo;
+    $('#ed-custo').value = fmtValor(custo);
+    total();
+  };
+
+  // preço do pregão na data escolhida, com atalho para usar o fechamento
+  let pedido = 0;
+  const buscarDia = async () => {
+    if (!temHistorico) return;
+    const dia = $('#ed-data').value;
+    const box = $('#ed-dia');
+    if (!dia) { box.textContent = ''; return; }
+    const meu = ++pedido;
+    box.textContent = 'buscando o preço do dia…';
+    const j = await precoNoDia(c.ticker, dia);
+    if (meu !== pedido || !dlg.open) return;
+    if (j.erro || !j.fechamento) { box.textContent = 'Não achei o preço desse dia.'; return; }
+    const outroDia = j.data !== dia ? ` (pregão de ${dataBR(j.data)})` : '';
+    const faixa = j.minima && j.maxima ? `entre ${R(j.minima)} e ${R(j.maxima)}` : '';
+    box.innerHTML = `Fechou a ${R(j.fechamento)}${outroDia}${faixa ? `, ${faixa}` : ''} · <button type="button" id="ed-usar">usar</button>`;
+    $('#ed-usar').onclick = () => { $('#ed-preco').value = fmtValor(j.fechamento); total(); };
+  };
+
+  dlg.oninput = (e) => {
+    if (e.target.id === 'ed-data') buscarDia();
+    total();
+  };
+  dlg.onchange = (e) => { if (e.target.id === 'ed-data') buscarDia(); };
+  $('#ed-recalc').onclick = recalcular;
+  $('#form-edit').addEventListener('submit', (e) => {
+    if (e.submitter?.value !== 'ok') return;
+    const { qtd, preco, custo } = ler();
+    const data = $('#ed-data').value;
+    const msg = !/^\d{4}-\d{2}-\d{2}$/.test(data) ? 'Escolha a data.'
+      : !(qtd > 0) ? `Informe ${tes ? 'quantos títulos' : 'quantas cotas'}.`
+      : !(preco > 0) ? 'Informe o preço pago.'
+      : !Number.isFinite(custo) ? 'Taxa inválida.' : '';
+    if (msg) { e.preventDefault(); const er = $('#ed-erro'); er.textContent = msg; er.hidden = false; }
+  });
+  dlg.onclose = () => {
+    if (dlg.returnValue !== 'ok') return;
+    const { qtd, preco, custo } = ler();
+    const nova = { id: c.id, data: $('#ed-data').value, ticker: c.ticker, tipo: c.tipo, qtd, preco, custo, banco: $('#ed-banco').value };
+    S.compras = S.compras.map((x) => (x.id === c.id ? nova : x));
+    N.adicionarCompras([nova]); // a nuvem grava por cima da mesma compra
+    persist();
+    toast('Compra corrigida.');
+    render();
+  };
+  total();
+  dlg.returnValue = '';
+  dlg.showModal();
+  buscarDia();
 }
 
 function niceStep(x) {
@@ -836,9 +966,12 @@ function renderCarteira() {
         <details class="mes-grupo" ${i === 0 ? 'open' : ''}>
           <summary class="mes-cab"><span>${nomeMesAno(mes).replace(/^./, (c) => c.toUpperCase())}</span><span class="num">${R(xs.reduce((s, x) => s + x.qtd * x.preco + (x.custo || 0), 0))}</span></summary>
           ${xs.map((x) => `<div class="item">
-            <span><b>${esc(x.ticker)}</b> · ${fmtQtd(x.qtd)} ${x.tipo === 'tesouro' ? 'tít.' : 'cotas'} × ${R(x.preco)}<small>${x.importado ? `${nomeMesAno(mes)} · da planilha, quantidade estimada` : `${dataBR(x.data)} · ${esc(banco(x.banco)?.nome || x.banco || '')}`}</small></span>
+            <span><b>${esc(x.ticker)}</b> · ${fmtQtd(x.qtd)} ${x.tipo === 'tesouro' ? 'tít.' : 'cotas'} × ${R(x.preco)}<small>${x.importado ? `${nomeMesAno(mes)} · da planilha, quantidade estimada` : `${dataBR(x.data)} · ${esc(banco(x.banco)?.nome || x.banco || '')}`}${Number(x.custo) > 0 ? ` · taxa ${R(x.custo)}` : ''}</small></span>
             <span class="num">${R(x.qtd * x.preco + (x.custo || 0))}</span>
-            <button type="button" class="x" data-del-compra="${x.id}" aria-label="Remover compra de ${esc(x.ticker)}">remover</button>
+            <span class="item-acoes">
+              <button type="button" class="x editar" data-edit-compra="${x.id}" aria-label="Editar compra de ${esc(x.ticker)}">editar</button>
+              <button type="button" class="x" data-del-compra="${x.id}" aria-label="Remover compra de ${esc(x.ticker)}">remover</button>
+            </span>
           </div>`).join('')}
         </details>`).join('')}
     </section>`;

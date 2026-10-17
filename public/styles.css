@@ -371,6 +371,9 @@ td input.preco-input:not([type="file"]) { margin: 0; width: 100px; text-align: r
 .mes-cab { display: flex; justify-content: space-between; font-weight: 700; font-family: var(--f-display); font-size: 0.95rem; padding: 10px 0 6px; border-bottom: 1px solid var(--linha); }
 .item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 0; font-size: 0.9rem; }
 .item small { display: block; }
+.item-acoes { display: flex; flex-direction: column; align-items: flex-end; }
+.item-acoes .x { padding: 3px 6px; }
+.x.editar:hover { color: var(--link); }
 .por-tipo { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .por-tipo div { padding: 10px 12px; border-radius: var(--raio); background: var(--folha-2); }
 .por-tipo small { display: block; font-size: 0.75rem; }
@@ -382,7 +385,11 @@ details.mais[open] summary { margin-bottom: 12px; }
 /* ---------- diálogos ---------- */
 .dlg { border: 1px solid var(--linha-forte); border-radius: var(--raio-g); padding: 0; width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); background: var(--folha-solida); color: var(--tinta); box-shadow: var(--sombra); }
 .dlg::backdrop { background: rgba(5, 6, 10, 0.5); backdrop-filter: blur(3px); }
-.dlg form#form-reg { display: grid; gap: 14px; padding: 20px; }
+.dlg form#form-reg, .dlg form.form-edit { display: grid; gap: 14px; padding: 20px; }
+.form-edit .campos.dois { grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.form-edit .campo .sub { min-height: 0; }
+.form-edit .disp-valor { font-size: 1rem; padding: 0 12px; }
+.erro-campo { color: var(--baixa); }
 .dlg .linhas { display: grid; gap: 8px; max-height: 45dvh; overflow: auto; }
 .dlg .linha { display: grid; grid-template-columns: minmax(0, 1fr) 80px 120px; gap: 8px; align-items: center; font-size: 0.9rem; }
 .dlg .linha input:not([type="file"]) { width: 100%; text-align: right; height: 38px; }
@@ -414,6 +421,7 @@ details.mes-grupo[open] > summary span:first-child::before { transform: rotate(9
 .s-fii { fill: var(--s-fii); background: var(--s-fii); }
 .s-outros { fill: var(--s-outros); background: var(--s-outros); }
 .s-tesouro { fill: var(--s-tes); background: var(--s-tes); }
+.s-taxa { fill: var(--tinta-3); background: var(--tinta-3); }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .grafico-bloco { gap: 16px; }
 .graf-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }

@@ -169,14 +169,16 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
   const chave = CHAVE_PERIODO[periodo] || CHAVE_PERIODO.mes;
   const m = new Map();
   const linha = (k) => {
-    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0 });
+    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 } });
     return m.get(k);
   };
   for (const c of compras) {
-    const v = Number(c.qtd) * Number(c.preco) + Number(c.custo || 0);
+    const custo = Number(c.custo || 0);
+    const v = Number(c.qtd) * Number(c.preco) + custo;
     const l = linha(chave(c.data));
     const grupo = c.tipo === 'acao' || c.tipo === 'fii' || c.tipo === 'tesouro' ? c.tipo : 'outros';
     l[grupo] += v;
+    l.tx[grupo] += custo; // taxas por tipo, para o gráfico poder mostrar o valor com ou sem elas
     l.total += v;
     l.compras++;
   }
@@ -190,6 +192,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
         ...l,
         acao: round2(l.acao), fii: round2(l.fii), tesouro: round2(l.tesouro), outros: round2(l.outros),
         total: round2(l.total), proventos: round2(l.proventos), acumulado: round2(acum),
+        tx: Object.fromEntries(Object.entries(l.tx).map(([k, v]) => [k, round2(v)])),
       };
     });
 }

@@ -1027,11 +1027,77 @@ function ligarRemover(attr, colecao) {
 }
 
 // ---------- aba Proventos ----------
+const TIPOS_PROV_ORDEM = ['dividendo', 'jcp', 'rendimento', 'juros', 'outro'];
+let PV_ANO = null; // ano escolhido no resumo ('tudo' = todos)
+
+/** Uma linha de barra empilhada com as fatias de cada tipo. */
+const barraTipos = (por, total) => `<div class="pv-barra" role="img" aria-label="Proventos por tipo">${TIPOS_PROV_ORDEM.filter((k) => por[k] > 0).map((k) => `<i class="pv-${k}" style="width:${(por[k] / total) * 100}%"></i>`).join('')}</div>`;
+
+function htmlCardProvento(x) {
+  const ativo = S.ativos.find((a) => a.ticker === x.ticker) || { ticker: x.ticker, tipo: S.compras.find((c) => c.ticker === x.ticker)?.tipo || 'acao' };
+  const varios = x.ticker === 'Vários';
+  return `<div class="card-compra card-prov" role="button" tabindex="0" data-edit-prov="${x.id}" aria-label="Editar provento de ${esc(x.ticker)}, ${dataBR(x.data)}">
+    ${varios ? '<span class="logo-ativo varios" aria-hidden="true"><span>∑</span></span>' : htmlLogo(ativo)}
+    <div class="cc-info">
+      <div class="cc-linha"><b class="cc-ticker">${esc(x.ticker)}</b><span class="cc-total num">${R(x.valor)}</span></div>
+      <div class="cc-linha cc-sub"><span class="pv-rotulo"><i class="sw pv-${esc(x.tipo)}"></i>${esc(TIPOS_PROVENTO[x.tipo] || x.tipo)}</span></div>
+      <div class="cc-linha cc-rodape"><small>${varios ? `${nomeMesAno(mesDe(x.data))} · da planilha` : dataBR(x.data)}</small>
+        <span class="cc-acoes">
+          <button type="button" class="ic-btn" data-edit-prov="${x.id}" title="Editar" aria-label="Editar provento de ${esc(x.ticker)}">${ICONE_EDITAR}</button>
+          <button type="button" class="ic-btn perigo" data-del-prov="${x.id}" title="Remover" aria-label="Remover provento de ${esc(x.ticker)}">${ICONE_LIXO}</button>
+        </span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function htmlResumoProventos() {
+  if (!S.proventos.length) return '';
+  const anos = [...new Set(S.proventos.map((p) => p.data.slice(0, 4)))].sort().reverse();
+  if (PV_ANO !== 'tudo' && !anos.includes(PV_ANO)) PV_ANO = anos[0];
+  const xs = S.proventos.filter((p) => PV_ANO === 'tudo' || p.data.startsWith(PV_ANO));
+  const total = round2(xs.reduce((s, p) => s + Number(p.valor || 0), 0));
+  const por = proventosPorTipo(xs);
+  const tipos = TIPOS_PROV_ORDEM.filter((k) => por[k] > 0);
+  // por ativo, com a divisão por tipo de cada um
+  const porAtivo = new Map();
+  for (const p of xs) {
+    const a = porAtivo.get(p.ticker) || { total: 0, tipos: {} };
+    a.total += Number(p.valor || 0);
+    a.tipos[p.tipo] = (a.tipos[p.tipo] || 0) + Number(p.valor || 0);
+    porAtivo.set(p.ticker, a);
+  }
+  const ativos = [...porAtivo.entries()].sort((a, b) => b[1].total - a[1].total);
+  const maior = ativos[0]?.[1].total || 1;
+  const semTipo = xs.filter((p) => p.ticker === 'Vários');
+  const pctDe = (v) => `${((v / total) * 100).toLocaleString('pt-BR', { maximumFractionDigits: v / total < 0.1 ? 1 : 0 })}%`;
+  return `
+    <section class="bloco pv-resumo">
+      <div class="bloco-cab">
+        <div><h2>Proventos ${PV_ANO === 'tudo' ? 'desde o início' : `em ${PV_ANO}`}</h2>
+          <small class="sub-cab"><b class="pv-total">${R(total)}</b>${xs.length > 1 ? ` · ${xs.length} pagamentos` : ''}</small></div>
+        <div class="seg" role="group" aria-label="Ano">${[...anos.slice(0, 3), 'tudo'].map((a) => `<button type="button" data-pv-ano="${a}" aria-pressed="${PV_ANO === a}">${a === 'tudo' ? 'Tudo' : a}</button>`).join('')}</div>
+      </div>
+
+      ${barraTipos(por, total)}
+      <div class="pv-tipos">
+        ${tipos.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span>${esc(TIPOS_PROVENTO[k].replace(' (FII)', ''))}</span><b class="num">${R(por[k])}</b><small>${pctDe(por[k])}</small></div>`).join('')}
+      </div>
+      ${semTipo.length ? `<p class="aviso pv-aviso"><b>${R(semTipo.reduce((s, p) => s + Number(p.valor), 0))}</b> vieram da planilha antiga só com o total do mês, sem ativo nem tipo. Com o informe de rendimentos do banco dá para separar.</p>` : ''}
+
+      <div class="pv-ativos">
+        <h3>Por ativo</h3>
+        ${ativos.map(([t, a]) => `<div class="pv-ativo">
+          <div class="cc-linha"><b>${esc(t)}</b><span class="num">${R(a.total)}</span></div>
+          <div class="pv-mini" style="width:${Math.max(4, (a.total / maior) * 100)}%">${barraTipos(a.tipos, a.total)}</div>
+          <small>${TIPOS_PROV_ORDEM.filter((k) => a.tipos[k] > 0).map((k) => `${esc(TIPOS_PROVENTO[k])} ${R(a.tipos[k])}`).join(' · ')}</small>
+        </div>`).join('')}
+      </div>
+    </section>`;
+}
+
 function renderProventos() {
   const tickers = [...new Set([...S.ativos.map((a) => a.ticker), ...S.compras.map((c) => c.ticker)])];
-  const ano = String(new Date().getFullYear());
-  const doAno = proventosPorTipo(S.proventos, (p) => p.data.startsWith(ano));
-  const totalAno = Object.values(doAno).reduce((s, v) => s + v, 0);
   const porMes = groupBy([...S.proventos].sort((a, b) => b.data.localeCompare(a.data)), (x) => mesDe(x.data));
   const mesAnt = mesAnterior(mesDe(hojeISO()));
   return `
@@ -1046,18 +1112,51 @@ function renderProventos() {
       </form>
     </section>
 
-    ${totalAno ? `<p class="dica">Em ${ano}: <b>${R(totalAno)}</b> — ${Object.entries(doAno).map(([k, v]) => `${esc(TIPOS_PROVENTO[k] || k)} ${R(v)}`).join(' · ')}</p>` : ''}
+    ${htmlResumoProventos()}
 
     ${S.proventos.length ? `<section class="bloco"><h2>Recebidos</h2>
       ${[...porMes.entries()].map(([mes, xs], i) => `
         <details class="mes-grupo" ${i === 0 ? 'open' : ''}>
           <summary class="mes-cab"><span>${nomeMesAno(mes).replace(/^./, (c) => c.toUpperCase())}</span><span class="num">${R(xs.reduce((s, x) => s + Number(x.valor), 0))}</span></summary>
-          ${xs.map((x) => `<div class="item">
-            <span><b>${esc(x.ticker)}</b> · ${esc(TIPOS_PROVENTO[x.tipo] || x.tipo)}<small>${dataBR(x.data)}</small></span>
-            <span class="num">${R(x.valor)}</span>
-            <button type="button" class="x" data-del-prov="${x.id}" aria-label="Remover provento de ${esc(x.ticker)}">remover</button>
-          </div>`).join('')}
+          <div class="compras-lista">${xs.map(htmlCardProvento).join('')}</div>
         </details>`).join('')}</section>` : ''}`;
+}
+
+function abrirEditarProvento(id) {
+  const p = S.proventos.find((x) => x.id === id);
+  if (!p) return;
+  const tickers = [...new Set([p.ticker, ...S.ativos.map((a) => a.ticker), ...S.compras.map((c) => c.ticker)])];
+  const dlg = $('#dlg-compra');
+  dlg.innerHTML = `
+    <form method="dialog" id="form-edit-prov" class="form-edit">
+      <h2>Editar provento</h2>
+      ${p.ticker === 'Vários' ? '<p class="dica">Veio da planilha antiga como total do mês. Escolha o ativo e o tipo, ou lance os pagamentos separados e remova este.</p>' : ''}
+      <div class="campos dois">
+        <label class="campo"><span>Data do pagamento</span><input type="date" id="ep-data" value="${esc(p.data)}" required></label>
+        <label class="campo"><span>Ativo</span><select id="ep-ticker">${tickers.map((t) => `<option ${t === p.ticker ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label>
+        <label class="campo"><span>Tipo</span><select id="ep-tipo">${Object.entries(TIPOS_PROVENTO).map(([k, v]) => `<option value="${k}" ${k === p.tipo ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+        <label class="campo"><span>Valor recebido (R$)</span><input id="ep-valor" class="num" inputmode="decimal" value="${fmtValor(p.valor)}" required></label>
+      </div>
+      <p class="dica erro-campo" id="ep-erro" hidden></p>
+      <div class="acoes"><span class="esp"></span><button class="btn" value="cancelar" formnovalidate>Cancelar</button><button class="btn prim" value="ok">Salvar</button></div>
+    </form>`;
+  dlg.oninput = null; dlg.onchange = null;
+  $('#form-edit-prov').addEventListener('submit', (e) => {
+    if (e.submitter?.value !== 'ok') return;
+    const v = num($('#ep-valor').value);
+    if (!(v > 0) || !$('#ep-data').value) { e.preventDefault(); const er = $('#ep-erro'); er.textContent = !(v > 0) ? 'Informe o valor recebido.' : 'Escolha a data.'; er.hidden = false; }
+  });
+  dlg.onclose = () => {
+    if (dlg.returnValue !== 'ok') return;
+    const novo = { id: p.id, data: $('#ep-data').value, ticker: $('#ep-ticker').value, tipo: $('#ep-tipo').value, valor: round2(num($('#ep-valor').value)) };
+    S.proventos = S.proventos.map((x) => (x.id === p.id ? novo : x));
+    N.adicionarProvento(novo); // a nuvem grava por cima do mesmo provento
+    persist();
+    toast('Provento corrigido.');
+    render();
+  };
+  dlg.returnValue = '';
+  dlg.showModal();
 }
 
 function ligarProventos() {
@@ -1075,6 +1174,17 @@ function ligarProventos() {
     S.proventos.push(p);
     N.adicionarProvento(p);
     persist(); render(); toast('Provento lançado.');
+  });
+  const raiz = $('#conteudo');
+  raiz.addEventListener('click', (e) => {
+    const ano = e.target.closest('[data-pv-ano]');
+    if (ano) { PV_ANO = ano.dataset.pvAno; const sec = $('.pv-resumo'); if (sec) sec.outerHTML = htmlResumoProventos(); return; }
+    if (e.target.closest('[data-del-prov]')) return;
+    const b = e.target.closest('[data-edit-prov]');
+    if (b) abrirEditarProvento(b.dataset.editProv);
+  });
+  raiz.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card-prov')) { e.preventDefault(); abrirEditarProvento(e.target.dataset.editProv); }
   });
   ligarRemover('data-del-prov', 'proventos');
 }

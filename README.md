@@ -10,7 +10,7 @@ Roda na Cloudflare (grátis): o site, uma API e um banco de dados D1 onde ficam 
 
 - **Comprar (tela inicial)** — resumo da carteira; aporte do mês + proventos do mês anterior = disponível. Cada ativo mostra quanto você já tem (cotas, preço médio, valor e resultado), o preço atual e os botões − / + / **MÁX** para montar a compra, com o total ao lado. Adicione ou tire ativos ali mesmo. Depois de comprar no banco, **Comprei — registrar** e as cotas entram na carteira. Cotações se atualizam sozinhas a cada 5 minutos.
 - **Histórico** — totais, posição por ativo, gráfico de aportes por mês (com ou sem as taxas) e lista de compras. Cada compra pode ser **editada** (data, cotas, preço pago, taxas e banco): ao escolher a data, o app mostra o fechamento e a faixa de preço daquele pregão, com um toque para usar.
-- **Proventos** — lança dividendos, JCP, rendimentos de FII e juros. O total do mês anterior entra sozinho no aporte.
+- **Proventos** — lança dividendos, JCP, rendimentos de FII e juros. Resumo por ano com a divisão por tipo e por ativo; cada provento pode ser editado. O total do mês anterior entra sozinho no aporte.
 - **Ajustes** — aporte padrão, lista de ativos, custos por banco, backup e status da nuvem.
 
 ## Colocar no ar na Cloudflare (uma vez só)

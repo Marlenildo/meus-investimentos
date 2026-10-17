@@ -531,3 +531,28 @@ html, body { overflow-x: clip; }
 
 /* Grades de uma coluna nunca crescem com o conteúdo: um texto longo quebra a linha em vez de alargar o bloco */
 .conteudo, .bloco { grid-template-columns: minmax(0, 1fr); }
+
+/* ---------- proventos por tipo ---------- */
+.pv-dividendo { background: var(--s-prov); }
+.pv-jcp { background: var(--s-acao); }
+.pv-rendimento { background: var(--s-fii); }
+.pv-juros { background: var(--s-tes); }
+.pv-outro { background: var(--tinta-3); }
+.pv-resumo h3 { font: 700 0.9rem var(--f-display); margin: 0 0 4px; }
+.pv-total { font: 700 1.05rem var(--f-display); color: var(--tinta); }
+.pv-barra { display: flex; gap: 2px; height: 12px; border-radius: 99px; overflow: hidden; background: var(--folha-2); }
+.pv-barra i { display: block; height: 100%; min-width: 3px; }
+.pv-tipos { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.pv-tipo { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 10px 12px; border-radius: var(--raio); background: var(--folha-2); font-size: 0.84rem; }
+.pv-tipo span { color: var(--tinta-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-tipo b { grid-column: 2; grid-row: 2; font: 700 1rem var(--f-display); }
+.pv-tipo small { grid-column: 3; grid-row: 2; color: var(--tinta-3); font-weight: 600; }
+.pv-aviso { font-size: 0.82rem; margin: 0; }
+.pv-ativos { display: grid; gap: 12px; border-top: 1px solid var(--linha); padding-top: 14px; }
+.pv-ativo { display: grid; gap: 5px; font-size: 0.9rem; }
+.pv-ativo b { font-family: var(--f-display); }
+.pv-ativo small { color: var(--tinta-3); font-size: 0.76rem; }
+.pv-mini .pv-barra { height: 7px; }
+.logo-ativo.varios { background: var(--folha); color: var(--tinta-2); font-size: 1rem; }
+.pv-rotulo { display: inline-flex; align-items: center; gap: 6px; }
+.pv-rotulo .sw { width: 8px; height: 8px; border-radius: 2px; }

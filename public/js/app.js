@@ -705,7 +705,7 @@ function htmlGrafico(largura) {
   // as taxas viram uma faixa própria no topo da barra (ou somem, com o filtro desligado)
   linhas = linhas.map(semTaxas);
   const podeMerc = acum && per !== 'dia' && dadosDoFiltro().compras.length > 0;
-  if (podeMerc) presentes.push({ k: 'mercado', nome: 'Valor de mercado' });
+  if (podeMerc) presentes.push({ k: 'mercado', nome: 'Total (mercado + proventos)' });
   const ativos = new Set((G.hist || []).filter((k) => presentes.some((x) => x.k === k)));
   const pilha = PILHA.filter((k) => ativos.has(k));
   const comProv = ativos.has('prov');
@@ -722,7 +722,8 @@ function htmlGrafico(largura) {
   const brutas = linhasDoGrafico(per);
   const totTaxa = comTaxa ? brutas.reduce((s, l) => s + taxasDe(l, pilha), 0) : 0;
   const totInv = brutas.map(semTaxas).reduce((s, l) => s + pilha.reduce((t, k) => t + l[k], 0), 0) + totTaxa;
-  const totProv = comProv ? brutas.reduce((s, l) => s + l.proventos, 0) : 0;
+  const totProvTodos = brutas.reduce((s, l) => s + l.proventos, 0);
+  const totProv = comProv ? totProvTodos : 0;
 
   // largura: cabe tudo na tela sempre que possível; só rola quando os períodos não cabem
   const n = linhas.length;
@@ -732,7 +733,8 @@ function htmlGrafico(largura) {
   const W = Math.round(n * slot);
   const H = comMerc ? 300 : 280, topo = comMerc ? 62 : 46, base = 30;
   const alt = H - topo - base;
-  const maxV = Math.max(1, ...linhas.map((l, i) => Math.max(inv(l), comProv ? l.proventos : 0, merc[i] || 0)));
+  const totalEm = (i) => (merc[i] != null ? merc[i] + (linhas[i].proventos || 0) : null); // a linha mostra o total: mercado + proventos
+  const maxV = Math.max(1, ...linhas.map((l, i) => Math.max(inv(l), comProv ? l.proventos : 0, totalEm(i) || 0)));
   const y = (v) => topo + alt * (1 - v / maxV);
   const duas = pilha.length && comProv;
   const wInv = Math.min(56, Math.max(18, slot * (duas ? 0.38 : 0.5)));
@@ -769,14 +771,15 @@ function htmlGrafico(largura) {
         ap += v;
       });
     }
-    const topoBarra = Math.min(acc ? y(acc) : H, comProv && l.proventos ? y(l.proventos) : H, merc[i] ? y(merc[i]) - 6 : H);
+    const topoBarra = Math.min(acc ? y(acc) : H, comProv && l.proventos ? y(l.proventos) : H, merc[i] != null ? y(totalEm(i)) - 6 : H);
     const [tx, anc] = slot >= 112 ? [cx, 'middle'] : i === 0 ? [i * slot + 4, 'start'] : i === n - 1 ? [(i + 1) * slot - 4, 'end'] : [cx, 'middle'];
     let rot = '';
     if (merc[i] != null && acc) {
-      const ganho = merc[i] - acc;
-      rot = `<text class="v" x="${tx}" y="${topoBarra - (comProv && l.proventos ? 36 : 22)}" text-anchor="${anc}">${reais(merc[i])}</text>`
-        + `<text class="v2 ${ganho >= 0 ? 'ganho' : 'perda'}" x="${tx}" y="${topoBarra - (comProv && l.proventos ? 22 : 8)}" text-anchor="${anc}">${ganho >= 0 ? '+' : '−'} ${reais(Math.abs(ganho))}</text>`
-        + (comProv && l.proventos ? `<text class="v2" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">prov. ${reais(l.proventos)}</text>` : '');
+      // total = valor de mercado + proventos recebidos até ali; embaixo, quanto isso passa do investido
+      const total = merc[i] + (l.proventos || 0);
+      const ganho = total - acc;
+      rot = `<text class="v" x="${tx}" y="${topoBarra - 22}" text-anchor="${anc}">${reais(total)}</text>`
+        + `<text class="v2 ${ganho >= 0 ? 'ganho' : 'perda'}" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">${ganho >= 0 ? '+' : '−'} ${reais(Math.abs(ganho))}</text>`;
     } else if (acc && comProv && l.proventos) rot = `<text class="v" x="${tx}" y="${topoBarra - 22}" text-anchor="${anc}">${reais(acc)}</text><text class="v2" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">+ ${reais(l.proventos)}</text>`;
     else if (acc) rot = `<text class="v" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">${reais(acc)}</text>`;
     else if (comProv && l.proventos) rot = `<text class="v" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">${reais(l.proventos)}</text>`;
@@ -787,7 +790,7 @@ function htmlGrafico(largura) {
     </g>`;
   }).join('');
 
-  const pts = merc.map((v, i) => (v != null ? [i * slot + slot / 2, y(v)] : null));
+  const pts = merc.map((v, i) => (v != null ? [i * slot + slot / 2, y(totalEm(i))] : null));
   const linhaMerc = comMerc && HIST ? `<polyline class="linha-merc" points="${pts.filter(Boolean).map((p) => p.join(',')).join(' ')}"/>${pts.map((p, i) => (p ? `<circle class="ponto-merc ${i === sel ? 'sel' : ''}" cx="${p[0]}" cy="${p[1]}" r="${i === sel ? 5 : 3}"/>` : '')).join('')}` : '';
 
   const l = linhas[sel];
@@ -795,16 +798,44 @@ function htmlGrafico(largura) {
     ...pilhaBarra.map((k) => [k === 'taxa' ? 'Taxas' : SERIES.find((x) => x.k === k).nome, l[k], `s-${k}`]),
     ...(comProv ? TIPOS_PROV_ORDEM.map((k) => [TIPOS_PROVENTO[k].replace(' (FII)', ''), l.pv?.[k] || 0, `pv-${k}`]) : []),
   ].filter(([, v]) => v > 0) : [];
-  const detalhe = l ? `
+  const temMercHoje = comMerc && HIST && merc[n - 1] != null;
+  const subCab = acum && temMercHoje
+    ? `Investido <b>${R(totInv)}</b> → total hoje <b>${R(merc[n - 1] + totProvTodos)}</b> <span class="${merc[n - 1] + totProvTodos >= totInv ? 'var-alta' : 'var-baixa'}">${pct(totInv ? (merc[n - 1] + totProvTodos) / totInv - 1 : null)}</span>`
+    : [
+      pilha.length ? `Investido <b>${R(totInv)}</b>${totTaxa > 0 ? ` <span class="apagado">(taxas ${R(totTaxa)})</span>` : ''}` : '',
+      comMerc && !HIST ? 'calculando o valor de mercado…' : '',
+      comProv ? `Proventos <b>${R(totProv)}</b>` : '',
+    ].filter(Boolean).join(' · ');
+  const conta = l && acum && pilha.length ? (() => {
+    const invS = inv(l);
+    const provS = l.proventos || 0;
+    const mercS = merc[sel];
+    const valoriz = mercS != null ? mercS - invS : null;
+    const total = invS + (valoriz || 0) + provS;
+    const ganho = total - invS;
+    const sinal = (v) => `${v >= 0 ? '+' : '−'} ${R(Math.abs(v))}`;
+    return `
+    <div class="conta">
+      <div class="conta-cab"><b>${per === 'dia' ? 'Até ' : 'Até '}${rotuloLongo(l.chave, per).replace(/^Até /, '')}</b>${G.ativo ? `<span class="apagado">${esc(G.ativo)}</span>` : ''}</div>
+      <div class="conta-linhas">
+        <div class="conta-l"><span>Investido</span><b class="num">${R(invS)}</b></div>
+        ${valoriz != null ? `<div class="conta-l"><span>Valorização<small>preço das cotas hoje</small></span><b class="num ${valoriz >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(valoriz)}</b></div>` : ''}
+        <div class="conta-l"><span>Proventos<small>dividendos, JCP, rendimentos</small></span><b class="num ${provS ? 'var-alta' : ''}">${sinal(provS)}</b></div>
+        <div class="conta-l conta-total"><span>Total${valoriz == null ? '<small>sem o valor de mercado</small>' : ''}</span><b class="num">${R(total)}</b></div>
+        <div class="conta-ret"><span>Retorno</span><b class="${ganho >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(ganho)} · ${pct(invS ? ganho / invS : null)}</b></div>
+      </div>
+    </div>`;
+  })() : '';
+  const detalhe = conta || (l ? `
     <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(l.chave, per)}</b>${pilha.length && inv(l) ? `<span>Investido <b>${R(inv(l))}</b>${comTaxa && l.taxa > 0 ? ` <span class="apagado">(taxas ${R(l.taxa)})</span>` : ''}${merc[sel] != null ? ` · Valia <b>${R(merc[sel])}</b> <span class="${merc[sel] >= inv(l) ? 'var-alta' : 'var-baixa'}">${merc[sel] >= inv(l) ? '+' : '−'}${R(Math.abs(merc[sel] - inv(l)))} (${pct(inv(l) ? merc[sel] / inv(l) - 1 : null)})</span>` : ''}</span>` : ''}</div>
-    ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, cls]) => `<span><i class="sw ${cls}"></i>${nome}<b>${R(v)}</b></span>`).join('')}${comProv && l.proventos ? `<span class="det-soma">Proventos<b>${R(l.proventos)}</b></span>` : ''}</div>` : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}` : '';
+    ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, cls]) => `<span><i class="sw ${cls}"></i>${nome}<b>${R(v)}</b></span>`).join('')}${comProv && l.proventos ? `<span class="det-soma">Proventos<b>${R(l.proventos)}</b></span>` : ''}</div>` : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}` : '');
 
   return `
     <section class="bloco grafico-bloco" id="graf-hist">
       <div class="graf-topo">
         <div>
           <h2>${acum ? 'Total acumulado' : 'Quanto investi'}${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
-          <small class="sub-cab">${pilha.length ? `Investido <b>${R(totInv)}</b>${totTaxa > 0 ? ` <span class="apagado">(taxas ${R(totTaxa)})</span>` : ''}` : ''}${comMerc && HIST && merc[n - 1] != null ? ` · Vale hoje <b>${R(merc[n - 1])}</b> <span class="${merc[n - 1] >= totInv ? 'var-alta' : 'var-baixa'}">${pct(totInv ? merc[n - 1] / totInv - 1 : null)}</span>` : ''}${comMerc && !HIST ? ' · calculando o valor de mercado…' : ''}${pilha.length && comProv ? ' · ' : ''}${comProv ? `Proventos <b>${R(totProv)}</b>` : ''}</small>
+          <small class="sub-cab">${subCab}</small>
         </div>
         <div class="graf-controles">
           <select id="graf-ativo" class="peq" aria-label="Ativo">

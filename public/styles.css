@@ -652,3 +652,17 @@ html, body { overflow-x: clip; }
 .graf-ativo-nome { color: var(--violeta); }
 .graf-controles .sel-btn.peq { max-width: 170px; }
 .det-itens .det-soma { color: var(--tinta-2); border-left: 1px solid var(--linha); padding-left: 10px; }
+
+/* acumulado: investido + valorização + proventos = total */
+.conta { display: grid; gap: 10px; }
+.conta-cab { display: flex; justify-content: space-between; gap: 10px; font-family: var(--f-display); }
+.conta-linhas { display: grid; gap: 2px; }
+.conta-l { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 7px 0; border-bottom: 1px dashed var(--linha); font-size: 0.92rem; }
+.conta-l span { display: grid; color: var(--tinta-2); }
+.conta-l small { font-size: 0.72rem; color: var(--tinta-3); }
+.conta-l b { font: 700 1rem var(--f-display); white-space: nowrap; }
+.conta-total { border-bottom: 0; border-top: 1.5px solid var(--tinta-3); margin-top: 2px; padding-top: 9px; }
+.conta-total span { color: var(--tinta); font-weight: 700; }
+.conta-total b { font-size: 1.15rem; }
+.conta-ret { display: flex; justify-content: space-between; font-size: 0.84rem; color: var(--tinta-2); }
+.conta-ret b { font-weight: 700; }

@@ -697,3 +697,7 @@ html, body { overflow-x: clip; }
 .pv-classe .pv-barra { height: 8px; }
 .pv-classe small { color: var(--tinta-3); font-size: 0.76rem; line-height: 1.4; }
 .det-classe { margin-top: 6px; font-size: 0.8rem; color: var(--tinta-2); }
+.conta-sub { border-top: 1px solid var(--tinta-3); }
+.conta-sub span { color: var(--tinta); font-weight: 600; }
+.conta-ret span { display: grid; }
+.conta-ret small { font-size: 0.7rem; color: var(--tinta-3); }

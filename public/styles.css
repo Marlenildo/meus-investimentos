@@ -133,6 +133,13 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.6; cursor: po
 .topo-in { display: flex; align-items: center; gap: 10px; padding-block: 10px; }
 .marca { display: inline-flex; align-items: center; gap: 10px; color: var(--tinta); text-decoration: none; font: 700 1.05rem var(--f-display); letter-spacing: -0.02em; margin-right: auto; min-width: 0; }
 .marca span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* celular: o nome quebra em duas linhas ao lado da logo e os botões do topo aparecem inteiros */
+@media (max-width: 560px) {
+  .marca { flex: 1 1 auto; gap: 8px; }
+  .marca span { white-space: normal; font-size: 0.9rem; line-height: 1.08; max-width: 7.6em; overflow: visible; }
+  .topo-in > .icone-btn, .topo-in > .nuvem-st { flex: none; }
+}
+@media (max-width: 330px) { .marca span { display: none; } }
 .marca img { display: block; flex: none; border-radius: 9px; }
 .icone-btn { width: 36px; height: 36px; flex: none; display: inline-grid; place-items: center; border-radius: 999px; border: 1px solid var(--linha); background: var(--folha); color: var(--tinta-2); cursor: pointer; transition: color 0.15s ease, border-color 0.15s ease; }
 .icone-btn:hover { color: var(--tinta); border-color: var(--linha-forte); }

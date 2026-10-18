@@ -1367,6 +1367,7 @@ function ligarRemover(attr, colecao) {
 
 // ---------- aba Proventos ----------
 let PV_ANO = null; // ano escolhido no resumo ('tudo' = todos)
+let PV_MES = null; // mês dentro do ano ('2026-10'), ou null para o ano todo
 
 /** Uma linha de barra empilhada com as fatias de cada tipo. */
 const barraTipos = (por, total) => `<div class="pv-barra" role="img" aria-label="Proventos por tipo">${TIPOS_PROV_ORDEM.filter((k) => por[k] > 0).map((k) => `<i class="pv-${k}" style="width:${(por[k] / total) * 100}%"></i>`).join('')}</div>`;
@@ -1390,11 +1391,22 @@ function htmlCardProvento(x) {
 }
 
 
+/** Deixa à vista o ano e o mês escolhidos nas faixas que rolam para o lado. */
+function centralizarFiltrosPv() {
+  document.querySelectorAll('.pv-resumo .seg-rola').forEach((faixa) => {
+    const b = faixa.querySelector('[aria-pressed="true"]');
+    if (b) faixa.scrollLeft = b.offsetLeft - (faixa.clientWidth - b.offsetWidth) / 2;
+  });
+}
+
 function htmlResumoProventos() {
   if (!S.proventos.length) return '';
   const anos = [...new Set(S.proventos.map((p) => p.data.slice(0, 4)))].sort().reverse();
   if (PV_ANO !== 'tudo' && !anos.includes(PV_ANO)) PV_ANO = anos[0];
-  const doAno = S.proventos.filter((p) => PV_ANO === 'tudo' || p.data.startsWith(PV_ANO));
+  const meses = PV_ANO === 'tudo' ? [] : [...new Set(S.proventos.filter((p) => p.data.startsWith(PV_ANO)).map((p) => p.data.slice(0, 7)))].sort();
+  if (PV_MES && !meses.includes(PV_MES)) PV_MES = null;
+  const doAno = S.proventos.filter((p) => (PV_ANO === 'tudo' || p.data.startsWith(PV_ANO)) && (!PV_MES || p.data.startsWith(PV_MES)));
+  const periodo = PV_ANO === 'tudo' ? 'desde o início' : PV_MES ? `em ${nomeMesAno(PV_MES)}` : `em ${PV_ANO}`;
   const xs = doAno.filter(ehProvDeFato);
   const extras = doAno.filter((p) => !ehProvDeFato(p));
   const somaDe = (ys) => round2(ys.reduce((s, p) => s + Number(p.valor || 0), 0));
@@ -1424,9 +1436,10 @@ function htmlResumoProventos() {
   return `
     <section class="bloco pv-resumo">
       <div class="seg seg-rola pv-anos" role="group" aria-label="Ano">${[...anos, 'tudo'].map((a) => `<button type="button" data-pv-ano="${a}" aria-pressed="${PV_ANO === a}">${a === 'tudo' ? 'Tudo' : a}</button>`).join('')}</div>
+      ${meses.length > 1 ? `<div class="seg seg-rola pv-meses" role="group" aria-label="Mês">${[null, ...meses].map((m) => `<button type="button" data-pv-mes="${m || ''}" aria-pressed="${PV_MES === m}">${m ? `<span class="cap">${nomeMes(m).slice(0, 3)}</span>` : 'Ano todo'}</button>`).join('')}</div>` : ''}
 
       <div class="pv-hero">
-        <small>${totalExtras > 0 ? 'Total recebido' : 'Proventos'} ${PV_ANO === 'tudo' ? 'desde o início' : `em ${PV_ANO}`}</small>
+        <small>${totalExtras > 0 ? 'Total recebido' : 'Proventos'} ${periodo}</small>
         <b class="pv-hero-valor num">${R(round2(total + totalExtras))}</b>
         ${totalExtras > 0 ? `
         <div class="pv-hero-barra" role="img" aria-label="Proventos e outros créditos"><i class="pv-dividendo" style="width:${(total / (total + totalExtras)) * 100}%"></i><i class="pv-outro" style="width:${(totalExtras / (total + totalExtras)) * 100}%"></i></div>
@@ -1580,7 +1593,9 @@ function ligarProventos() {
   const raiz = $('#conteudo');
   raiz.addEventListener('click', (e) => {
     const ano = e.target.closest('[data-pv-ano]');
-    if (ano) { PV_ANO = ano.dataset.pvAno; const sec = $('.pv-resumo'); if (sec) sec.outerHTML = htmlResumoProventos(); return; }
+    if (ano) { PV_ANO = ano.dataset.pvAno; PV_MES = null; const sec = $('.pv-resumo'); if (sec) sec.outerHTML = htmlResumoProventos(); centralizarFiltrosPv(); return; }
+    const mes = e.target.closest('[data-pv-mes]');
+    if (mes) { PV_MES = mes.dataset.pvMes || null; const sec = $('.pv-resumo'); if (sec) sec.outerHTML = htmlResumoProventos(); centralizarFiltrosPv(); return; }
     if (e.target.closest('[data-del-prov]')) return;
     const b = e.target.closest('[data-edit-prov]');
     if (b) abrirEditarProvento(b.dataset.editProv);

@@ -1369,7 +1369,7 @@ function htmlCardProvento(x) {
 }
 
 // Proventos de fato (o que o ativo rendeu) e outros créditos (dinheiro que caiu na conta por outro motivo)
-const PROV_DE_FATO = ['dividendo', 'jcp', 'rendimento', 'juros'];
+const PROV_DE_FATO = ['dividendo', 'jcp', 'rendimento', 'juros', 'atualizacao']; // a correção vem junto com o dividendo e o Nubank soma nos proventos
 const ehProvDeFato = (p) => PROV_DE_FATO.includes(p.tipo) || p.ticker === 'Vários'; // os totais da planilha antiga são proventos, só sem tipo
 
 function htmlResumoProventos() {
@@ -1422,7 +1422,7 @@ function htmlResumoProventos() {
 
       ${totalExtras > 0 ? `<div class="pv-extras">
         <div class="pv-tipo pv-tipo-total pv-extras-total"><i class="sw pv-outro"></i><span>Outros créditos</span><b class="num">${R(totalExtras)}</b><small>${extras.length} ${extras.length === 1 ? 'lançamento' : 'lançamentos'}</small></div>
-        <p class="dica">Correções, frações, resgates e afins: dinheiro que entrou na conta, mas não é rendimento do ativo. Fica fora do total de proventos acima.</p>
+        <p class="dica">Frações, resgates e afins: dinheiro que entrou na conta, mas não é rendimento do ativo. Fica fora do total de proventos acima.</p>
         <div class="pv-tipos">
           ${tiposExtra.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span title="${esc(TIPOS_PROVENTO[k])}">${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])}</span><b class="num">${R(porExtra[k])}</b><small>${pctDe(porExtra[k], totalExtras)}</small></div>`).join('')}
         </div>

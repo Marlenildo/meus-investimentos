@@ -150,7 +150,7 @@ export function novidades(lido, existentes) {
   const usadasC = new Set();
   const bate = (o, cs) => {
     const q = cs.reduce((s, c) => s + Number(c.qtd), 0);
-    if (o.lado === 'B') return Math.abs(q - o.qtdB3 * o.fator) < 1e-6;
+    if (o.lado === 'B') return true; // bonificação do mesmo ativo perto da data é o mesmo evento (a B3 pode mostrar com fração)
     return perto(cs.reduce((s, c) => s + valorC(c), 0), o.valor); // o valor não muda com desdobramento
   };
   const tenta = (o, filtroData) => {
@@ -165,7 +165,8 @@ export function novidades(lido, existentes) {
     return false;
   };
   const faltam1 = lido.operacoes.filter((o) => !tenta(o, (c) => c.data === o.data));
-  const faltam = faltam1.filter((o) => !tenta(o, (c) => dias(o.liq, c.data) >= 0 && dias(o.liq, c.data) <= 7));
+  // bonificação não tem pregão: a data da B3 (crédito das cotas) pode ficar semanas antes ou depois da data do app
+  const faltam = faltam1.filter((o) => !tenta(o, (c) => (o.lado === 'B' ? Math.abs(dias(o.liq, c.data)) <= 45 : dias(o.liq, c.data) >= 0 && dias(o.liq, c.data) <= 7)));
   const operacoes = faltam.map((o) => ({
     ...o,
     qtd: round2(o.qtdB3 * o.fator * 1e6) / 1e6, // quantidade de hoje

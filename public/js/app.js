@@ -1,6 +1,7 @@
 import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
   mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, classesPorTicker, liquidoSeVender, dataLiquidacao, emLiquidacao, estimarCompra, fatoresDoMes, precoTesouroEm,
+  PROV_DE_FATO, ehProvDeFato,
 } from './calc.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
@@ -714,14 +715,14 @@ function htmlGrafico(largura) {
   const acum = G.modo === 'acumulado';
   let linhas = linhasDoGrafico(per);
   if (acum) {
-    const soma = { acao: 0, fii: 0, outros: 0, tesouro: 0, proventos: 0 };
+    const soma = { acao: 0, fii: 0, outros: 0, tesouro: 0, proventos: 0, extras: 0 };
     const tx = { acao: 0, fii: 0, outros: 0, tesouro: 0 };
     const pv = {};
     const pvc = {};
     const tes = {};
     linhas = linhas.map((l) => {
       for (const [k, v] of Object.entries(l.tes || {})) tes[k] = (tes[k] || 0) + v;
-      for (const k of Object.keys(soma)) soma[k] += l[k];
+      for (const k of Object.keys(soma)) soma[k] += l[k] || 0;
       for (const k of Object.keys(tx)) tx[k] += l.tx?.[k] || 0;
       for (const [k, v] of Object.entries(l.pv || {})) pv[k] = (pv[k] || 0) + v;
       for (const [k, v] of Object.entries(l.pvc || {})) pvc[k] = (pvc[k] || 0) + v;
@@ -898,32 +899,51 @@ function htmlGrafico(largura) {
   const porClasse = (pvc) => Object.entries(NOME_CLASSE).filter(([k]) => (pvc?.[k] || 0) > 0).map(([k, nm]) => `${nm} ${R(pvc[k])}`).join(' · ');
   const conta = l && acum && pilha.length ? (() => {
     const invS = inv(l);
-    const provS = l.proventos || 0;
+    const provS = l.proventos || 0; // tudo que entrou sem sair do bolso
+    const extrasS = Math.min(provS, l.extras || 0); // frações, resgates…
+    const provFato = provS - extrasS; // dividendos, JCP, rendimentos, correção
     const mercS = merc[sel];
     const valoriz = mercS != null ? mercS - invS : null;
-    const bolso = Math.max(0, invS - provS); // o que saiu do seu bolso: os proventos foram reinvestidos nos aportes
+    const bolso = Math.max(0, invS - provS); // o que saiu do seu bolso: proventos e créditos foram reinvestidos nos aportes
     const ganho = (valoriz || 0) + provS;
     const sinal = (v) => `${v >= 0 ? '+' : '−'} ${R(Math.abs(v))}`;
+    const hoje = sel === n - 1;
+    const lq = hoje && !simples ? liquidoSeVender(dadosDoFiltro().compras, S.ativos, hojeISO()) : null;
+    const desc = lq ? lq.total.ir + lq.total.iof + lq.total.taxas : 0;
+    const linhaVal = valoriz != null ? `<div class="conta-l"><span>Valorização<small>${hoje ? 'pelo preço das cotas hoje' : `pelo preço no fim de ${rotuloCurto(l.chave, per)}`}</small></span><b class="num ${valoriz >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(valoriz)}</b></div>` : '';
+    const linhaCarteira = valoriz != null ? `<div class="conta-l conta-total"><span>Valor da carteira</span><b class="num">${R(mercS)}</b></div>` : '<div class="conta-l conta-total"><span>Valor da carteira<small>sem preços para calcular</small></span><b class="num">—</b></div>';
+    const linhaGanho = (sm) => `<div class="conta-ret"><span>Ganho total<small>${sm}</small></span><b class="${ganho >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(ganho)} · ${pct(bolso ? ganho / bolso : null)}</b></div>`;
+    const cab = `<div class="conta-cab"><b>Até ${rotuloLongo(l.chave, per).replace(/^Até /, '')}</b>${G.ativo ? `<span class="apagado">${esc(G.ativo)}</span>` : ''}</div>`;
+
+    if (simples) {
+      // só o essencial: bolso, o que veio de graça, valorização e o resultado
+      return `
+    <div class="conta conta-simples">
+      ${cab}
+      <div class="conta-linhas">
+        ${provS ? `<div class="conta-l"><span>Do seu bolso</span><b class="num">${R(bolso)}</b></div>
+        <div class="conta-l"><span>Proventos e créditos</span><b class="num var-alta">${sinal(provS)}</b></div>` : `<div class="conta-l"><span>Investido</span><b class="num">${R(invS)}</b></div>`}
+        ${linhaVal}
+        ${linhaCarteira}
+        ${linhaGanho('sobre o que saiu do bolso')}
+      </div>
+    </div>`;
+    }
+
     return `
     <div class="conta">
-      <div class="conta-cab"><b>Até ${rotuloLongo(l.chave, per).replace(/^Até /, '')}</b>${G.ativo ? `<span class="apagado">${esc(G.ativo)}</span>` : ''}</div>
+      ${cab}
       <div class="conta-linhas">
         ${provS ? `<div class="conta-l"><span>Do seu bolso<small>aportes</small></span><b class="num">${R(bolso)}</b></div>
-        <div class="conta-l"><span>Proventos reinvestidos<small>${porClasse(l.pvc) || 'dividendos, JCP, rendimentos'}</small></span><b class="num var-alta">${sinal(provS)}</b></div>` : ''}
+        ${provFato > 0.005 ? `<div class="conta-l"><span>Proventos reinvestidos<small>dividendos, JCP, rendimentos e correção${extrasS > 0.005 ? '' : ` · ${porClasse(l.pvc)}`}</small></span><b class="num var-alta">${sinal(provFato)}</b></div>` : ''}
+        ${extrasS > 0.005 ? `<div class="conta-l"><span>Outros créditos reinvestidos<small>frações, resgates e afins: não é provento, mas também não saiu do bolso</small></span><b class="num var-alta">${sinal(extrasS)}</b></div>` : ''}` : ''}
         <div class="conta-l ${provS ? 'conta-sub' : ''}"><span>Investido</span><b class="num">${R(invS)}</b></div>
-        ${valoriz != null ? `<div class="conta-l"><span>Valorização<small>${sel === n - 1 ? 'pelo preço das cotas hoje' : `pelo preço no fim de ${rotuloCurto(l.chave, per)}`}</small></span><b class="num ${valoriz >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(valoriz)}</b></div>
-        <div class="conta-l conta-total"><span>Valor da carteira</span><b class="num">${R(mercS)}</b></div>
-        ${sel === n - 1 ? (() => {
-          const lq = liquidoSeVender(dadosDoFiltro().compras, S.ativos, hojeISO());
-          const desc = lq.total.ir + lq.total.iof + lq.total.taxas;
-          return desc >= 0.01 ? `<div class="conta-l"><span>Imposto e taxas se vender hoje<small>IR ${R(lq.total.ir + lq.total.iof)} · taxas ${R(lq.total.taxas)}</small></span><b class="num var-baixa">− ${R(desc)}</b></div>
-          <div class="conta-l conta-liq"><span>Líquido</span><b class="num">${R(mercS - desc)}</b></div>` : '';
-        })() : ''}` : '<div class="conta-l conta-total"><span>Valor da carteira<small>sem preços para calcular</small></span><b class="num">—</b></div>'}
-        <div class="conta-ret"><span>Ganho total<small>valorização ${R(valoriz || 0)} + proventos ${R(provS)}, sobre o que saiu do bolso</small></span><b class="${ganho >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(ganho)} · ${pct(bolso ? ganho / bolso : null)}</b></div>
-        ${sel === n - 1 ? (() => {
-          const lq = liquidoSeVender(dadosDoFiltro().compras, S.ativos, hojeISO());
-          const desc = lq.total.ir + lq.total.iof + lq.total.taxas;
-          if (desc < 0.01) return '';
+        ${linhaVal}
+        ${linhaCarteira}
+        ${valoriz != null && desc >= 0.01 ? `<div class="conta-l"><span>Imposto e taxas se vender hoje<small>IR ${R(lq.total.ir + lq.total.iof)} · taxas ${R(lq.total.taxas)}</small></span><b class="num var-baixa">− ${R(desc)}</b></div>
+          <div class="conta-l conta-liq"><span>Líquido</span><b class="num">${R(mercS - desc)}</b></div>` : ''}
+        ${linhaGanho(`valorização ${R(valoriz || 0)} + proventos ${R(provFato)}${extrasS > 0.005 ? ` + outros créditos ${R(extrasS)}` : ''}, sobre o que saiu do bolso`)}
+        ${desc >= 0.01 ? (() => {
           const g2 = ganho - desc;
           return `<div class="conta-ret"><span>Ganho líquido<small>descontado o imposto e as taxas de vender hoje</small></span><b class="${g2 >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(g2)} · ${pct(bolso ? g2 / bolso : null)}</b></div>`;
         })() : ''}
@@ -1368,9 +1388,6 @@ function htmlCardProvento(x) {
   </div>`;
 }
 
-// Proventos de fato (o que o ativo rendeu) e outros créditos (dinheiro que caiu na conta por outro motivo)
-const PROV_DE_FATO = ['dividendo', 'jcp', 'rendimento', 'juros', 'atualizacao']; // a correção vem junto com o dividendo e o Nubank soma nos proventos
-const ehProvDeFato = (p) => PROV_DE_FATO.includes(p.tipo) || p.ticker === 'Vários'; // os totais da planilha antiga são proventos, só sem tipo
 
 function htmlResumoProventos() {
   if (!S.proventos.length) return '';

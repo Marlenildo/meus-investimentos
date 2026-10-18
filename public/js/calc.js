@@ -22,6 +22,11 @@ export const TIPOS_PROVENTO = {
   outro: 'Outros',
 };
 
+// Proventos de fato: o que o ativo rendeu. Frações, resgates e outros são créditos à parte.
+// Os totais mensais da planilha antiga ("Vários") eram proventos, só sem tipo.
+export const PROV_DE_FATO = ['dividendo', 'jcp', 'rendimento', 'juros', 'atualizacao'];
+export const ehProvDeFato = (p) => PROV_DE_FATO.includes(p.tipo) || p.ticker === 'Vários';
+
 export const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
 export function passoDe(ativo) {
@@ -226,7 +231,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
   const chave = CHAVE_PERIODO[periodo] || CHAVE_PERIODO.mes;
   const m = new Map();
   const linha = (k) => {
-    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 }, pv: {}, pvc: {}, tes: {} });
+    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, extras: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 }, pv: {}, pvc: {}, tes: {} });
     return m.get(k);
   };
   const vendas = processarOperacoes(compras);
@@ -259,6 +264,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
     l.pvc[c] = (l.pvc[c] || 0) + Number(p.valor || 0); // proventos por classe: ações, FIIs…
     const t = TIPOS_PROVENTO[p.tipo] ? p.tipo : 'outro';
     l.proventos += Number(p.valor || 0);
+    if (!ehProvDeFato(p)) l.extras += Number(p.valor || 0); // frações, resgates… (já incluídos em proventos)
     l.pv[t] = (l.pv[t] || 0) + Number(p.valor || 0); // por tipo, para empilhar no gráfico
   }
   let acum = 0;
@@ -269,7 +275,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
       return {
         ...l,
         acao: round2(l.acao), fii: round2(l.fii), tesouro: round2(l.tesouro), outros: round2(l.outros),
-        total: round2(l.total), proventos: round2(l.proventos), acumulado: round2(acum),
+        total: round2(l.total), proventos: round2(l.proventos), extras: round2(l.extras), acumulado: round2(acum),
         tx: Object.fromEntries(Object.entries(l.tx).map(([k, v]) => [k, round2(v)])),
         pv: Object.fromEntries(Object.entries(l.pv).map(([k, v]) => [k, round2(v)])),
         pvc: Object.fromEntries(Object.entries(l.pvc).map(([k, v]) => [k, round2(v)])),

@@ -1426,16 +1426,11 @@ function htmlResumoProventos() {
     <section class="bloco pv-resumo">
       <div class="bloco-cab">
         <div><h2>Proventos ${PV_ANO === 'tudo' ? 'desde o início' : `em ${PV_ANO}`}</h2>
-          <small class="sub-cab"><b class="pv-total">${R(total)}</b>${xs.length > 1 ? ` · ${xs.length} pagamentos` : ''}${totalExtras > 0 ? ` · ${R(round2(total + totalExtras))} com outros créditos` : ''}</small></div>
+          <small class="sub-cab">${totalExtras > 0 ? 'Total recebido ' : ''}<b class="pv-total">${R(round2(total + totalExtras))}</b></small></div>
         <div class="seg seg-rola" role="group" aria-label="Ano">${[...anos, 'tudo'].map((a) => `<button type="button" data-pv-ano="${a}" aria-pressed="${PV_ANO === a}">${a === 'tudo' ? 'Tudo' : a}</button>`).join('')}</div>
       </div>
 
       ${total > 0 ? barraTipos(por, total) : ''}
-      ${totalExtras > 0 ? `<div class="pv-geral">
-        <div class="cc-linha"><span>Proventos</span><b class="num">${R(total)}</b></div>
-        <div class="cc-linha"><span>+ Outros créditos <small>frações, resgates</small></span><b class="num">${R(totalExtras)}</b></div>
-        <div class="cc-linha pv-geral-total"><span>Total recebido</span><b class="num">${R(round2(total + totalExtras))}</b></div>
-      </div>` : ''}
       <div class="pv-tipos">
         <div class="pv-tipo pv-tipo-total"><i class="sw pv-total-sw"></i><span>Proventos</span><b class="num">${R(total)}</b><small>${xs.length} ${xs.length === 1 ? 'pagamento' : 'pagamentos'}</small></div>
         ${tipos.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span title="${esc(TIPOS_PROVENTO[k])}">${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])}</span><b class="num">${R(por[k])}</b><small>${pctDe(por[k])}</small></div>`).join('')}
@@ -1443,8 +1438,7 @@ function htmlResumoProventos() {
       ${semTipo.length ? `<p class="aviso pv-aviso"><b>${R(semTipo.reduce((s, p) => s + Number(p.valor), 0))}</b> vieram da planilha antiga só com o total do mês, sem ativo nem tipo. Com o informe de rendimentos do banco dá para separar.</p>` : ''}
 
       ${totalExtras > 0 ? `<div class="pv-extras">
-        <div class="pv-tipo pv-tipo-total pv-extras-total"><i class="sw pv-outro"></i><span>Outros créditos</span><b class="num">${R(totalExtras)}</b><small>${extras.length} ${extras.length === 1 ? 'lançamento' : 'lançamentos'}</small></div>
-        <p class="dica">Frações, resgates e afins: dinheiro que entrou na conta, mas não é rendimento do ativo. Fica fora do total de proventos acima.</p>
+        <div class="pv-tipo pv-tipo-total pv-extras-total"><i class="sw pv-outro"></i><span>Outros créditos <small class="pv-nota">frações, resgates</small></span><b class="num">${R(totalExtras)}</b><small>${extras.length} ${extras.length === 1 ? 'lançamento' : 'lançamentos'}</small></div>
         <div class="pv-tipos">
           ${tiposExtra.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span title="${esc(TIPOS_PROVENTO[k])}">${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])}</span><b class="num">${R(porExtra[k])}</b><small>${pctDe(porExtra[k], totalExtras)}</small></div>`).join('')}
         </div>

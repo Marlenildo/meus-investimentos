@@ -782,10 +782,4 @@ html, body { overflow-x: clip; }
 .pv-extras-total { background: var(--folha-2); }
 .pv-extras-lista { display: grid; gap: 4px; font-size: 0.86rem; }
 .pv-extras-lista small { color: var(--tinta-3); }
-.pv-geral { display: grid; gap: 4px; padding: 12px 14px; border-radius: var(--raio); background: var(--folha-2); font-size: 0.9rem; }
-.pv-geral span { color: var(--tinta-2); }
-.pv-geral small { color: var(--tinta-3); font-size: 0.74rem; }
-.pv-geral b { font: 700 0.98rem var(--f-display); }
-.pv-geral-total { border-top: 1px solid var(--linha); padding-top: 6px; margin-top: 2px; }
-.pv-geral-total span { color: var(--tinta); font-weight: 700; }
-.pv-geral-total b { font-size: 1.15rem; }
+.pv-nota { font-weight: 500; color: var(--tinta-3); font-size: 0.74rem; }

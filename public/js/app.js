@@ -1776,7 +1776,8 @@ async function lerExtratoB3(f) {
   const XLSX = await carregarXLSX();
   const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true });
   const linhas = wb.SheetNames.flatMap((n) => XLSX.utils.sheet_to_json(wb.Sheets[n], { defval: '', raw: true }));
-  const lido = lerMovimentacao(linhas);
+  const tipos = new Map([...S.compras.map((c) => [c.ticker, c.tipo]), ...S.ativos.map((a) => [a.ticker, a.tipo])]);
+  const lido = lerMovimentacao(linhas, { tipos });
   if (!lido.proventos.length && !lido.operacoes.length && !Object.keys(lido.ignorados).length) {
     throw new Error('Esse arquivo não parece o extrato de Movimentação da B3.');
   }
@@ -1804,8 +1805,9 @@ function abrirResumoB3(res) {
       ${operacoes.length ? `<div class="b3-bloco">
         <div class="cc-linha"><b>${operacoes.length} ${operacoes.length === 1 ? 'operação que não está' : 'operações que não estão'} no app</b></div>
         <small class="dica">Compras e vendas liquidadas na B3 sem registro aqui. A data é a do pregão (dois dias úteis antes da liquidação) e a taxa é estimada pelo seu banco. Desmarque o que não quiser.</small>
-        <div class="b3-lista">${operacoes.map((o, i) => `<label class="cc-linha b3-op"><span><input type="checkbox" data-b3-op="${i}" checked> ${dataBR(o.data).slice(0, 5)} <b>${esc(o.ticker)}</b> <small>${o.lado === 'V' ? 'venda' : 'compra'} · ${fmtQtd(o.qtd)} × ${R(o.preco)}</small></span><span class="num">${R(o.qtd * o.preco)}</span></label>`).join('')}</div>
+        <div class="b3-lista">${operacoes.map((o, i) => `<label class="cc-linha b3-op"><span><input type="checkbox" data-b3-op="${i}" checked> ${dataBR(o.data).slice(0, 5)} <b>${esc(o.ticker)}</b> <small>${o.lado === 'V' ? 'venda' : o.lado === 'B' ? 'bonificação' : 'compra'} · ${fmtQtd(o.qtd)}${o.lado === 'B' ? ' cotas' : ` × ${R(o.preco)}`}${o.original !== o.ticker ? ` · era ${esc(o.original)}` : ''}${o.fator !== 1 ? ' · já com o desdobramento' : ''}</small></span><span class="num">${o.lado === 'B' ? '' : R(o.qtd * o.preco)}</span></label>`).join('')}</div>
       </div>` : ''}
+      ${res.avisos.length ? `<p class="aviso">Confira à mão, o app não ajusta sozinho: ${res.avisos.map((a) => `${esc(a.nome)} de ${esc(a.ticker)} em ${dataBR(a.data)}`).join('; ')}.</p>` : ''}
       ${ignorados.length ? `<p class="dica">Sem efeito no app: ${ignorados.map(([n, q]) => `${esc(n)}${q > 1 ? ` (${q})` : ''}`).join(', ')}. Tesouro Direto não vem por aqui.</p>` : ''}
       <div class="acoes"><span class="esp"></span><button class="btn" value="cancelar" formnovalidate>${proventos.length || operacoes.length ? 'Cancelar' : 'Fechar'}</button>${proventos.length || operacoes.length ? '<button class="btn prim" value="ok">Adicionar ao app</button>' : ''}</div>
     </form>`;
@@ -1814,7 +1816,7 @@ function abrirResumoB3(res) {
     if (dlg.returnValue !== 'ok') return;
     const marcadas = [...dlg.querySelectorAll('[data-b3-op]')].filter((c) => c.checked).map((c) => operacoes[Number(c.dataset.b3Op)]);
     const bk = banco();
-    const novas = marcadas.map((o) => ({ id: uid(), data: o.data, ticker: o.ticker, tipo: S.ativos.find((a) => a.ticker === o.ticker)?.tipo || o.tipo, qtd: o.qtd, preco: o.preco, custo: custoOrdem({ tipo: o.tipo }, o.qtd, o.preco, bk), banco: bk.id, ...(o.lado === 'V' ? { lado: 'V' } : {}) }));
+    const novas = marcadas.map((o) => ({ id: uid(), data: o.data, ticker: o.ticker, tipo: S.ativos.find((a) => a.ticker === o.ticker)?.tipo || o.tipo, qtd: o.qtd, preco: o.preco, custo: o.lado === 'B' ? 0 : custoOrdem({ tipo: o.tipo }, o.qtd, o.preco, bk), banco: bk.id, ...(o.lado !== 'C' ? { lado: o.lado } : {}) }));
     if (novas.length) { S.compras.push(...novas); N.adicionarCompras(novas); }
     if (proventos.length) { S.proventos.push(...proventos); N.adicionarProvento(proventos); }
     garantirAtivosDaCarteira();

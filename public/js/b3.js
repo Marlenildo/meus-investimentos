@@ -1,6 +1,17 @@
 // Lê o extrato de Movimentação da Área do Investidor da B3 (.xlsx ou .csv)
-// e separa o que é novo: proventos, frações, resgates e compras/vendas que ainda não estão no app.
+// e separa o que é novo: proventos, frações, resgates, bonificações e compras/vendas que ainda não estão no app.
+//
+// O app guarda tudo pelo nome e pela quantidade de HOJE; a B3 mostra como era no dia. Por isso:
+// - ticker antigo vira o atual (IRDM11 → IRIM11) e recibos/direitos de FII (IRIM15) viram a cota (IRIM11);
+// - compras de antes de um desdobramento são comparadas pelo valor (1 × 46,78 = 2 × 23,39);
+// - resgate que já está no app como venda (CIEL3 na OPA) não vira provento.
 import { round2, dataPregao } from './calc.js';
+
+/** Tickers que mudaram de nome: antigo → atual. */
+export const RENOMEADOS = { IRDM11: 'IRIM11' };
+
+/** Desdobramentos (fator > 1) e grupamentos (fator < 1): quantas cotas de hoje vale 1 cota de antes da data. */
+export const DESDOBRAMENTOS = [{ ticker: 'BBAS3', data: '2024-04-16', fator: 2 }];
 
 const semAcento = (t) => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
@@ -24,7 +35,26 @@ export function dataISO(v) {
   return iso ? iso[0] : null;
 }
 
-/** Tipo de provento a partir do nome da movimentação. `fii`: se o ativo é fundo imobiliário. */
+/** Fator para trazer uma quantidade da data `d` para a de hoje. */
+export const fatorAte = (ticker, d) => DESDOBRAMENTOS.filter((s) => s.ticker === ticker && s.data > d).reduce((f, s) => f * s.fator, 1);
+
+/**
+ * Nome da B3 → nome usado no app.
+ * `conhecidos`: tickers que o app já tem (ativos e compras).
+ */
+export function normalizarTicker(t, conhecidos = new Set()) {
+  let x = RENOMEADOS[t] || t;
+  // recibo ou direito de subscrição de FII (…12 a …15) é a mesma cota (…11)
+  const fii = x.match(/^([A-Z]{4})1[2-5]$/);
+  if (fii) x = RENOMEADOS[`${fii[1]}11`] || `${fii[1]}11`;
+  if (conhecidos.has(x)) return x;
+  // direito/recibo de ação (ITSA1, ITSA2, ITSA9…): se só um ativo do app tem a mesma raiz, é ele
+  const raiz = x.slice(0, 4);
+  const mesmos = [...conhecidos].filter((k) => k.slice(0, 4) === raiz && /^[A-Z]{4}\d{1,2}$/.test(k));
+  return mesmos.length === 1 && /^[A-Z]{4}(1|2|9|10)$/.test(x) ? mesmos[0] : x;
+}
+
+/** Tipo de provento a partir do nome da movimentação. */
 function tipoProvento(mov, fii) {
   if (mov.includes('juros sobre capital')) return 'jcp';
   if (mov.startsWith('dividendo')) return 'dividendo';
@@ -35,12 +65,18 @@ function tipoProvento(mov, fii) {
   return null;
 }
 
+// eventos sem dinheiro que mexem na quantidade: o app não aplica sozinho, só avisa
+const EVENTOS_COTAS = ['desdobro', 'desdobramento', 'grupamento', 'incorporacao', 'atualizacao', 'cisao', 'conversao'];
+
 /**
  * Linhas da planilha (objetos com as colunas do cabeçalho) → movimentos entendidos.
- * Devolve { proventos, operacoes, ignorados } — operações são compras (C) e vendas (V) da bolsa.
+ * `ctx.tipos`: Map ticker → tipo do app ('acao', 'fii'…).
+ * Devolve { proventos, operacoes, avisos, ignorados }.
  */
-export function lerMovimentacao(linhas) {
-  const proventos = [], operacoes = [], ignorados = {};
+export function lerMovimentacao(linhas, ctx = {}) {
+  const tipos = ctx.tipos || new Map();
+  const conhecidos = new Set(tipos.keys());
+  const proventos = [], operacoes = [], avisos = [], ignorados = {};
   for (const bruta of linhas) {
     const l = {};
     for (const [k, v] of Object.entries(bruta)) l[semAcento(k)] = v;
@@ -49,69 +85,96 @@ export function lerMovimentacao(linhas) {
     const data = dataISO(l['data']);
     if (!mov || !produto || !data) continue;
     const credito = semAcento(l['entrada/saida']).startsWith('cred');
-    const ticker = produto.split(' - ')[0].trim().toUpperCase();
-    const ehTicker = /^[A-Z]{4}\d{1,2}[A-Z]?$/.test(ticker);
+    const original = produto.split(' - ')[0].trim().toUpperCase();
+    const ehTicker = /^[A-Z]{4}\d{1,2}[A-Z]?$/.test(original);
+    const ticker = ehTicker ? normalizarTicker(original, conhecidos) : original;
     const qtd = numero(l['quantidade']);
     const preco = numero(l['preco unitario']);
     const valor = numero(l['valor da operacao']);
-    const fii = /11[A-Z]?$/.test(ticker);
+    const tipoAtivo = tipos.get(ticker) || (/11$/.test(ticker) ? 'fii' : 'acao');
+    const nome = String(l['movimentacao']).trim();
 
     if (ehTicker && mov.startsWith('transferencia - liquidacao') && qtd > 0 && preco > 0) {
-      operacoes.push({ liq: data, data: dataPregao(data), ticker, tipo: fii ? 'fii' : 'acao', lado: credito ? 'C' : 'V', qtd, preco: round2(preco * 10000) / 10000 });
+      const pregao = dataPregao(data);
+      operacoes.push({ liq: data, data: pregao, ticker, original, tipo: tipoAtivo, lado: credito ? 'C' : 'V', qtdB3: qtd, precoB3: preco, valor: round2(qtd * preco), fator: fatorAte(ticker, pregao) });
       continue;
     }
-    const tipo = credito && valor > 0 && ehTicker ? tipoProvento(mov, fii) : null;
-    if (tipo) { proventos.push({ data, ticker, tipo, valor: round2(valor) }); continue; }
-    const nome = String(l['movimentacao']).trim();
+    if (ehTicker && credito && mov.startsWith('bonificacao') && qtd > 0) {
+      operacoes.push({ liq: data, data, ticker, original, tipo: tipoAtivo, lado: 'B', qtdB3: qtd, precoB3: 0, valor: 0, fator: fatorAte(ticker, data) });
+      continue;
+    }
+    const tipo = credito && valor > 0 && ehTicker ? tipoProvento(mov, tipoAtivo === 'fii') : null;
+    if (tipo) { proventos.push({ data, ticker, original, tipo, valor: round2(valor) }); continue; }
+    if (ehTicker && EVENTOS_COTAS.some((e) => mov.startsWith(e))) avisos.push({ data, ticker, nome, qtd, credito });
     ignorados[nome] = (ignorados[nome] || 0) + 1;
   }
-  return { proventos, operacoes, ignorados };
+  return { proventos, operacoes, avisos, ignorados };
 }
 
 const DIA = 86400000;
 const dias = (a, b) => Math.round((new Date(`${a}T12:00:00`) - new Date(`${b}T12:00:00`)) / DIA);
 const abrev = { dividendo: 'div', jcp: 'jcp', rendimento: 'ren', atualizacao: 'atu', juros: 'jur', fracao: 'out', resgate: 'out' };
+const valorC = (c) => Number(c.qtd) * Number(c.preco);
+const perto = (a, b) => Math.abs(a - b) <= Math.max(0.05, Math.abs(b) * 0.002);
+const ladoApp = (c) => (['V', 'B', 'A'].includes(c.lado) ? c.lado : 'C');
 
 /**
  * Compara com o que o app já tem e devolve só o que falta.
- * Proventos: mesmo ativo, tipo e valor na mesma data (ou até 7 dias de diferença, para os lançados à mão).
- * Operações: mesmo ativo e lado, com a quantidade batendo com as compras do app do pregão até 7 dias antes da liquidação.
+ * Proventos: mesmo ativo e valor na mesma data (com ou sem o mesmo tipo), depois até 7 dias de diferença.
+ * Resgates e frações que já estão no app como venda do mesmo valor são pulados.
+ * Operações: mesmo ativo e lado, com o valor (ou a quantidade de hoje) batendo com uma compra do app,
+ * ou com a soma das compras de um mesmo pregão. Primeiro no dia exato, depois até 7 dias antes da liquidação.
  */
 export function novidades(lido, existentes) {
-  const usadosP = new Set();
   const provs = existentes.proventos || [];
-  const achaProv = (p, tolerancia) => provs.find((x) => !usadosP.has(x) && x.ticker === p.ticker && x.tipo === p.tipo
-    && Math.abs(Number(x.valor) - p.valor) < 0.005 && Math.abs(dias(x.data, p.data)) <= tolerancia);
-  const pendentes = [];
-  for (const p of lido.proventos) { const x = achaProv(p, 0); if (x) usadosP.add(x); else pendentes.push(p); }
-  const proventos = [];
-  const seq = {};
-  for (const p of pendentes) {
-    const x = achaProv(p, 7);
-    if (x) { usadosP.add(x); continue; }
-    const base = `b3${p.data.replace(/-/g, '')}${p.ticker.toLowerCase()}${abrev[p.tipo] || 'out'}`;
-    let n = seq[base] || 1;
-    const ids = new Set(provs.map((y) => y.id));
-    while (ids.has(`${base}${n}`) || proventos.some((y) => y.id === `${base}${n}`)) n++;
-    seq[base] = n + 1;
-    proventos.push({ id: `${base}${n}`, ...p });
-  }
+  const usadosP = new Set();
+  const casa = (p, fn) => { const x = provs.find((y) => !usadosP.has(y) && fn(y)); if (x) usadosP.add(x); return !!x; };
+  const mesmoValor = (p) => (y) => y.ticker === p.ticker && Math.abs(Number(y.valor) - p.valor) < 0.005;
+  let resto = lido.proventos.filter((p) => !casa(p, (y) => mesmoValor(p)(y) && y.tipo === p.tipo && y.data === p.data));
+  resto = resto.filter((p) => !casa(p, (y) => mesmoValor(p)(y) && y.data === p.data));
+  resto = resto.filter((p) => !casa(p, (y) => mesmoValor(p)(y) && y.tipo === p.tipo && Math.abs(dias(y.data, p.data)) <= 7));
+  const vendas = (existentes.compras || []).filter((c) => ladoApp(c) === 'V');
+  resto = resto.filter((p) => !(['resgate', 'fracao'].includes(p.tipo) && vendas.some((v) => v.ticker === p.ticker && Math.abs(dias(v.data, p.data)) <= 7 && perto(valorC(v), p.valor))));
 
-  const usadasC = new Set();
+  const ids = new Set(provs.map((y) => y.id));
+  const proventos = resto.map((p) => {
+    const base = `b3${p.data.replace(/-/g, '')}${p.ticker.toLowerCase()}${abrev[p.tipo] || 'out'}`;
+    let n = 1;
+    while (ids.has(`${base}${n}`)) n++;
+    ids.add(`${base}${n}`);
+    const { original, ...resto2 } = p;
+    return { id: `${base}${n}`, ...resto2 };
+  });
+
   const compras = (existentes.compras || []).filter((c) => c.tipo !== 'tesouro');
-  const lado = (c) => (c.lado === 'V' ? 'V' : 'C');
-  const operacoes = [];
-  for (const o of lido.operacoes) {
-    const candidatas = compras.filter((c) => !usadasC.has(c) && c.ticker === o.ticker && lado(c) === o.lado
-      && dias(o.liq, c.data) >= 0 && dias(o.liq, c.data) <= 7);
-    // uma compra igual, ou várias do mesmo pregão que somam a quantidade da liquidação
-    const igual = candidatas.find((c) => Math.abs(c.qtd - o.qtd) < 1e-6);
-    if (igual) { usadasC.add(igual); continue; }
+  const usadasC = new Set();
+  const bate = (o, cs) => {
+    const q = cs.reduce((s, c) => s + Number(c.qtd), 0);
+    if (o.lado === 'B') return Math.abs(q - o.qtdB3 * o.fator) < 1e-6;
+    return perto(cs.reduce((s, c) => s + valorC(c), 0), o.valor); // o valor não muda com desdobramento
+  };
+  const tenta = (o, filtroData) => {
+    const cand = compras.filter((c) => !usadasC.has(c) && c.ticker === o.ticker && ladoApp(c) === o.lado && filtroData(c))
+      .sort((a, b) => Math.abs(dias(a.data, o.data)) - Math.abs(dias(b.data, o.data)));
+    const uma = cand.find((c) => bate(o, [c]));
+    if (uma) { usadasC.add(uma); return true; }
     const porDia = new Map();
-    for (const c of candidatas) porDia.set(c.data, [...(porDia.get(c.data) || []), c]);
-    const grupo = [...porDia.values()].find((cs) => Math.abs(cs.reduce((s, c) => s + c.qtd, 0) - o.qtd) < 1e-6);
-    if (grupo) { grupo.forEach((c) => usadasC.add(c)); continue; }
-    operacoes.push(o);
-  }
-  return { proventos, operacoes };
+    for (const c of cand) porDia.set(c.data, [...(porDia.get(c.data) || []), c]);
+    const grupo = [...porDia.values()].find((cs) => cs.length > 1 && bate(o, cs));
+    if (grupo) { grupo.forEach((c) => usadasC.add(c)); return true; }
+    return false;
+  };
+  const faltam1 = lido.operacoes.filter((o) => !tenta(o, (c) => c.data === o.data));
+  const faltam = faltam1.filter((o) => !tenta(o, (c) => dias(o.liq, c.data) >= 0 && dias(o.liq, c.data) <= 7));
+  const operacoes = faltam.map((o) => ({
+    ...o,
+    qtd: round2(o.qtdB3 * o.fator * 1e6) / 1e6, // quantidade de hoje
+    preco: o.lado === 'B' ? 0 : Math.round((o.precoB3 / o.fator) * 1e4) / 1e4,
+  }));
+  // avisos de eventos que o app já registrou (ajuste ou bonificação perto da data, ou desdobramento conhecido) não aparecem
+  // e eventos antigos (mais de um mês antes do último registro do app) já foram tratados
+  const ultimo = [...(existentes.compras || []), ...provs].reduce((m, x) => (x.data > m ? x.data : m), '');
+  const avisos = (lido.avisos || []).filter((a) => (!ultimo || dias(ultimo, a.data) <= 31) && !DESDOBRAMENTOS.some((d) => d.ticker === a.ticker && Math.abs(dias(d.data, a.data)) <= 10)
+    && !(existentes.compras || []).some((c) => c.ticker === a.ticker && ['A', 'B'].includes(ladoApp(c)) && Math.abs(dias(c.data, a.data)) <= 10));
+  return { proventos, operacoes, avisos };
 }

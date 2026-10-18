@@ -772,3 +772,13 @@ html, body { overflow-x: clip; }
 @media (max-width: 520px) { .liq-desc { text-align: left; } }
 .cc-liq { background: var(--acento-suave); color: var(--violeta); }
 .cc-rodape small { white-space: normal; }
+
+/* Proventos: anos com rolagem lateral e "outros créditos" separados */
+.seg-rola { max-width: 100%; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.seg-rola::-webkit-scrollbar { display: none; }
+.seg-rola button { flex: none; }
+.pv-extras { display: grid; gap: 8px; border-top: 1px solid var(--linha); padding-top: 14px; }
+.pv-extras .dica { margin: 0; font-size: 0.8rem; }
+.pv-extras-total { background: var(--folha-2); }
+.pv-extras-lista { display: grid; gap: 4px; font-size: 0.86rem; }
+.pv-extras-lista small { color: var(--tinta-3); }

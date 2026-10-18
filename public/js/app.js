@@ -1368,14 +1368,24 @@ function htmlCardProvento(x) {
   </div>`;
 }
 
+// Proventos de fato (o que o ativo rendeu) e outros créditos (dinheiro que caiu na conta por outro motivo)
+const PROV_DE_FATO = ['dividendo', 'jcp', 'rendimento', 'juros'];
+const ehProvDeFato = (p) => PROV_DE_FATO.includes(p.tipo) || p.ticker === 'Vários'; // os totais da planilha antiga são proventos, só sem tipo
+
 function htmlResumoProventos() {
   if (!S.proventos.length) return '';
   const anos = [...new Set(S.proventos.map((p) => p.data.slice(0, 4)))].sort().reverse();
   if (PV_ANO !== 'tudo' && !anos.includes(PV_ANO)) PV_ANO = anos[0];
-  const xs = S.proventos.filter((p) => PV_ANO === 'tudo' || p.data.startsWith(PV_ANO));
-  const total = round2(xs.reduce((s, p) => s + Number(p.valor || 0), 0));
+  const doAno = S.proventos.filter((p) => PV_ANO === 'tudo' || p.data.startsWith(PV_ANO));
+  const xs = doAno.filter(ehProvDeFato);
+  const extras = doAno.filter((p) => !ehProvDeFato(p));
+  const somaDe = (ys) => round2(ys.reduce((s, p) => s + Number(p.valor || 0), 0));
+  const total = somaDe(xs);
+  const totalExtras = somaDe(extras);
   const por = proventosPorTipo(xs);
   const tipos = TIPOS_PROV_ORDEM.filter((k) => por[k] > 0);
+  const porExtra = proventosPorTipo(extras);
+  const tiposExtra = TIPOS_PROV_ORDEM.filter((k) => porExtra[k] > 0);
   // por ativo, com a divisão por tipo de cada um
   const porAtivo = new Map();
   for (const p of xs) {
@@ -1387,23 +1397,39 @@ function htmlResumoProventos() {
   const ativos = [...porAtivo.entries()].sort((a, b) => b[1].total - a[1].total);
   const maior = ativos[0]?.[1].total || 1;
   const semTipo = xs.filter((p) => p.ticker === 'Vários');
-  const pctDe = (v) => `${((v / total) * 100).toLocaleString('pt-BR', { maximumFractionDigits: v / total < 0.1 ? 1 : 0 })}%`;
+  const pctDe = (v, base = total) => `${((v / (base || 1)) * 100).toLocaleString('pt-BR', { maximumFractionDigits: v / (base || 1) < 0.1 ? 1 : 0 })}%`;
+  // outros créditos por ativo, numa linha curta cada
+  const extrasPorAtivo = new Map();
+  for (const p of extras) {
+    const a = extrasPorAtivo.get(p.ticker) || {};
+    a[p.tipo] = (a[p.tipo] || 0) + Number(p.valor || 0);
+    extrasPorAtivo.set(p.ticker, a);
+  }
   return `
     <section class="bloco pv-resumo">
       <div class="bloco-cab">
         <div><h2>Proventos ${PV_ANO === 'tudo' ? 'desde o início' : `em ${PV_ANO}`}</h2>
-          <small class="sub-cab"><b class="pv-total">${R(total)}</b>${xs.length > 1 ? ` · ${xs.length} pagamentos` : ''}</small></div>
-        <div class="seg" role="group" aria-label="Ano">${[...anos.slice(0, 3), 'tudo'].map((a) => `<button type="button" data-pv-ano="${a}" aria-pressed="${PV_ANO === a}">${a === 'tudo' ? 'Tudo' : a}</button>`).join('')}</div>
+          <small class="sub-cab"><b class="pv-total">${R(total)}</b>${xs.length > 1 ? ` · ${xs.length} pagamentos` : ''}${totalExtras > 0 ? ` · + ${R(totalExtras)} em outros créditos` : ''}</small></div>
+        <div class="seg seg-rola" role="group" aria-label="Ano">${[...anos, 'tudo'].map((a) => `<button type="button" data-pv-ano="${a}" aria-pressed="${PV_ANO === a}">${a === 'tudo' ? 'Tudo' : a}</button>`).join('')}</div>
       </div>
 
-      ${barraTipos(por, total)}
+      ${total > 0 ? barraTipos(por, total) : ''}
       <div class="pv-tipos">
-        <div class="pv-tipo pv-tipo-total"><i class="sw pv-total-sw"></i><span>Total</span><b class="num">${R(total)}</b><small>${xs.length} ${xs.length === 1 ? 'pagamento' : 'pagamentos'}</small></div>
+        <div class="pv-tipo pv-tipo-total"><i class="sw pv-total-sw"></i><span>Proventos</span><b class="num">${R(total)}</b><small>${xs.length} ${xs.length === 1 ? 'pagamento' : 'pagamentos'}</small></div>
         ${tipos.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span title="${esc(TIPOS_PROVENTO[k])}">${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])}</span><b class="num">${R(por[k])}</b><small>${pctDe(por[k])}</small></div>`).join('')}
       </div>
       ${semTipo.length ? `<p class="aviso pv-aviso"><b>${R(semTipo.reduce((s, p) => s + Number(p.valor), 0))}</b> vieram da planilha antiga só com o total do mês, sem ativo nem tipo. Com o informe de rendimentos do banco dá para separar.</p>` : ''}
 
-      ${(() => {
+      ${totalExtras > 0 ? `<div class="pv-extras">
+        <div class="pv-tipo pv-tipo-total pv-extras-total"><i class="sw pv-outro"></i><span>Outros créditos</span><b class="num">${R(totalExtras)}</b><small>${extras.length} ${extras.length === 1 ? 'lançamento' : 'lançamentos'}</small></div>
+        <p class="dica">Correções, frações, resgates e afins: dinheiro que entrou na conta, mas não é rendimento do ativo. Fica fora do total de proventos acima.</p>
+        <div class="pv-tipos">
+          ${tiposExtra.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span title="${esc(TIPOS_PROVENTO[k])}">${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])}</span><b class="num">${R(porExtra[k])}</b><small>${pctDe(porExtra[k], totalExtras)}</small></div>`).join('')}
+        </div>
+        <div class="pv-extras-lista">${[...extrasPorAtivo.entries()].sort((a, b) => Object.values(b[1]).reduce((s, v) => s + v, 0) - Object.values(a[1]).reduce((s, v) => s + v, 0)).map(([t, a]) => `<div class="cc-linha"><span><b>${esc(t)}</b> <small>${TIPOS_PROV_ORDEM.filter((k) => a[k] > 0).map((k) => esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])).join(' · ')}</small></span><span class="num">${R(Object.values(a).reduce((s, v) => s + v, 0))}</span></div>`).join('')}</div>
+      </div>` : ''}
+
+      ${total > 0 ? (() => {
         const classe = classesPorTicker(S.compras);
         const pc = {};
         const pct2 = {};
@@ -1423,9 +1449,9 @@ function htmlResumoProventos() {
             <small>${pctDe(pc[k])} do total · ${TIPOS_PROV_ORDEM.filter((t) => pct2[k][t] > 0).map((t) => `${esc(TIPOS_PROVENTO[t].replace(' (FII)', ''))} ${R(pct2[k][t])}`).join(' · ')}</small>
           </div>`).join('')}</div>
         </div>` : '';
-      })()}
+      })() : ''}
 
-      <div class="pv-ativos">
+      ${ativos.length ? `<div class="pv-ativos">
         <h3>Por ativo</h3>
         ${(() => {
           // agrupa por classe: ações, fundos imobiliários…
@@ -1446,7 +1472,7 @@ function htmlResumoProventos() {
             </div>`;
           }).join('');
         })()}
-      </div>
+      </div>` : ''}
     </section>`;
 }
 

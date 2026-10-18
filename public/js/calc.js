@@ -478,5 +478,12 @@ export function dataLiquidacao(c) {
   return d;
 }
 
+/** Data do pregão a partir da data de liquidação (dois dias úteis antes). */
+export function dataPregao(liq) {
+  let d = liq, uteis = 0;
+  while (uteis < 2) { d = somaDia(d, -1); if (diaUtil(d)) uteis++; }
+  return d;
+}
+
 /** Compras e vendas da bolsa que ainda não liquidaram (não aparecem na custódia do banco). */
 export const emLiquidacao = (compras, hoje) => compras.filter((c) => ladoDe(c) !== 'B' && ladoDe(c) !== 'A' && dataLiquidacao(c) > hoje);

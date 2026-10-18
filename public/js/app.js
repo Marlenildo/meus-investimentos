@@ -1,8 +1,9 @@
 import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
   mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, classesPorTicker, liquidoSeVender, dataLiquidacao, emLiquidacao, estimarCompra, fatoresDoMes, precoTesouroEm,
-  PROV_DE_FATO, ehProvDeFato,
+  PROV_DE_FATO, ehProvDeFato, custoOrdem,
 } from './calc.js';
+import { lerMovimentacao, novidades } from './b3.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
 import * as N from './nuvem.js';
@@ -1615,6 +1616,24 @@ function renderAjustes() {
     </section>
 
     <section class="bloco">
+      <h2>Importar extrato da B3</h2>
+      <p class="dica">Uma vez por mês, traga os proventos e as compras do mês. Pode repetir meses sem medo: o que já está no app é pulado.</p>
+      <ol class="passos">
+        <li>Entre em <b>investidor.b3.com.br</b> pelo navegador, com seu CPF e senha (ou gov.br).</li>
+        <li>No menu, abra <b>Extratos</b> e depois a aba <b>Movimentação</b>.</li>
+        <li>Em <b>Filtrar</b>, escolha o período. Pode ser só o mês passado.</li>
+        <li>Toque no botão de <b>baixar</b> e escolha <b>Excel</b>.</li>
+        <li>Volte aqui, toque em <b>Escolher extrato</b> e pegue o arquivo baixado.</li>
+        <li>Confira o resumo e toque em <b>Adicionar ao app</b>.</li>
+      </ol>
+      <div class="acoes">
+        <label class="btn prim" for="b3-arquivo">Escolher extrato…</label>
+        <input type="file" id="b3-arquivo" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
+        <span class="dica" id="b3-status"></span>
+      </div>
+    </section>
+
+    <section class="bloco">
       <h2>Trazer a planilha antiga</h2>
       <p class="dica">Escolha o arquivo <b>planilha-acoes.json</b> (gerado a partir do seu Excel). O app busca o preço de cada mês, estima quantas cotas você comprou e mostra um resumo antes de salvar. Os valores ficam exatamente os da planilha.</p>
       <div class="acoes">
@@ -1739,6 +1758,74 @@ function abrirResumoPlanilha(res) {
   dlg.showModal();
 }
 
+// ---------- extrato de Movimentação da B3 ----------
+let xlsxPronto = null;
+function carregarXLSX() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  xlsxPronto ||= new Promise((ok, falha) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload = () => ok(window.XLSX);
+    sc.onerror = () => { xlsxPronto = null; falha(new Error('Não consegui carregar o leitor de planilhas. Verifique a internet.')); };
+    document.head.appendChild(sc);
+  });
+  return xlsxPronto;
+}
+
+async function lerExtratoB3(f) {
+  const XLSX = await carregarXLSX();
+  const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true });
+  const linhas = wb.SheetNames.flatMap((n) => XLSX.utils.sheet_to_json(wb.Sheets[n], { defval: '', raw: true }));
+  const lido = lerMovimentacao(linhas);
+  if (!lido.proventos.length && !lido.operacoes.length && !Object.keys(lido.ignorados).length) {
+    throw new Error('Esse arquivo não parece o extrato de Movimentação da B3.');
+  }
+  const datas = [...lido.proventos.map((p) => p.data), ...lido.operacoes.map((o) => o.liq)].sort();
+  return { ...novidades(lido, S), lido, de: datas[0], ate: datas[datas.length - 1] };
+}
+
+function abrirResumoB3(res) {
+  const { proventos, operacoes, lido } = res;
+  const jaTinha = lido.proventos.length - proventos.length + lido.operacoes.length - operacoes.length;
+  const somaP = round2(proventos.reduce((s, p) => s + p.valor, 0));
+  const porTipo = proventosPorTipo(proventos);
+  const ignorados = Object.entries(lido.ignorados);
+  const dlg = $('#dlg-registrar');
+  dlg.innerHTML = `
+    <form method="dialog" id="form-reg">
+      <h2>Extrato da B3</h2>
+      <p class="dica">${res.de ? `De ${dataBR(res.de)} a ${dataBR(res.ate)}.` : ''} ${jaTinha ? `${jaTinha} ${jaTinha === 1 ? 'item já estava' : 'itens já estavam'} no app e ${jaTinha === 1 ? 'foi pulado' : 'foram pulados'}.` : ''}</p>
+      ${!proventos.length && !operacoes.length ? '<p class="aviso">Nada novo: tudo deste extrato já está no app.</p>' : ''}
+      ${proventos.length ? `<div class="b3-bloco">
+        <div class="cc-linha"><b>${proventos.length} ${proventos.length === 1 ? 'provento novo' : 'proventos novos'}</b><b class="num">${R(somaP)}</b></div>
+        <small class="dica">${TIPOS_PROV_ORDEM.filter((k) => porTipo[k] > 0).map((k) => `${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])} ${R(porTipo[k])}`).join(' · ')}</small>
+        <div class="b3-lista">${proventos.map((p) => `<div class="cc-linha"><span>${dataBR(p.data).slice(0, 5)} <b>${esc(p.ticker)}</b> <small>${esc(NOME_CURTO_PROV[p.tipo] || TIPOS_PROVENTO[p.tipo])}</small></span><span class="num">${R(p.valor)}</span></div>`).join('')}</div>
+      </div>` : ''}
+      ${operacoes.length ? `<div class="b3-bloco">
+        <div class="cc-linha"><b>${operacoes.length} ${operacoes.length === 1 ? 'operação que não está' : 'operações que não estão'} no app</b></div>
+        <small class="dica">Compras e vendas liquidadas na B3 sem registro aqui. A data é a do pregão (dois dias úteis antes da liquidação) e a taxa é estimada pelo seu banco. Desmarque o que não quiser.</small>
+        <div class="b3-lista">${operacoes.map((o, i) => `<label class="cc-linha b3-op"><span><input type="checkbox" data-b3-op="${i}" checked> ${dataBR(o.data).slice(0, 5)} <b>${esc(o.ticker)}</b> <small>${o.lado === 'V' ? 'venda' : 'compra'} · ${fmtQtd(o.qtd)} × ${R(o.preco)}</small></span><span class="num">${R(o.qtd * o.preco)}</span></label>`).join('')}</div>
+      </div>` : ''}
+      ${ignorados.length ? `<p class="dica">Sem efeito no app: ${ignorados.map(([n, q]) => `${esc(n)}${q > 1 ? ` (${q})` : ''}`).join(', ')}. Tesouro Direto não vem por aqui.</p>` : ''}
+      <div class="acoes"><span class="esp"></span><button class="btn" value="cancelar" formnovalidate>${proventos.length || operacoes.length ? 'Cancelar' : 'Fechar'}</button>${proventos.length || operacoes.length ? '<button class="btn prim" value="ok">Adicionar ao app</button>' : ''}</div>
+    </form>`;
+  dlg.oninput = null;
+  dlg.onclose = () => {
+    if (dlg.returnValue !== 'ok') return;
+    const marcadas = [...dlg.querySelectorAll('[data-b3-op]')].filter((c) => c.checked).map((c) => operacoes[Number(c.dataset.b3Op)]);
+    const bk = banco();
+    const novas = marcadas.map((o) => ({ id: uid(), data: o.data, ticker: o.ticker, tipo: S.ativos.find((a) => a.ticker === o.ticker)?.tipo || o.tipo, qtd: o.qtd, preco: o.preco, custo: custoOrdem({ tipo: o.tipo }, o.qtd, o.preco, bk), banco: bk.id, ...(o.lado === 'V' ? { lado: 'V' } : {}) }));
+    if (novas.length) { S.compras.push(...novas); N.adicionarCompras(novas); }
+    if (proventos.length) { S.proventos.push(...proventos); N.adicionarProvento(proventos); }
+    garantirAtivosDaCarteira();
+    persist();
+    toast(`Adicionado: ${[proventos.length ? `${proventos.length} ${proventos.length === 1 ? 'provento' : 'proventos'}` : '', novas.length ? `${novas.length} ${novas.length === 1 ? 'operação' : 'operações'}` : ''].filter(Boolean).join(' e ')}.`);
+    render();
+  };
+  dlg.returnValue = '';
+  dlg.showModal();
+}
+
 function ligarAjustes() {
   $('#conteudo').addEventListener('click', (e) => {
     const t = e.target.closest('[data-tema]');
@@ -1759,6 +1846,14 @@ function ligarAjustes() {
     if (!S.ajustes.token) return;
     try { await buscarCotacao('BBAS3', S.ajustes.token); toast('Token funcionando.'); }
     catch (err) { toast(`Token salvo, mas a brapi respondeu: ${err.message}.`); }
+  });
+  $('#b3-arquivo').addEventListener('change', async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    const st = $('#b3-status');
+    st.textContent = 'Lendo o extrato…';
+    try { const res = await lerExtratoB3(f); st.textContent = ''; abrirResumoB3(res); } catch (err) { st.textContent = ''; toast(err.message || 'Não consegui ler esse arquivo.'); }
   });
   $('#pl-arquivo').addEventListener('change', async (e) => {
     const f = e.target.files?.[0];

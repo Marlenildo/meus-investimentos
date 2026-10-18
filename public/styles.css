@@ -800,3 +800,13 @@ html, body { overflow-x: clip; }
 .pv-extra span { display: grid; min-width: 0; }
 .pv-extra small { color: var(--tinta-3); font-size: 0.76rem; }
 .pv-extra > b { font: 700 0.98rem var(--f-display); white-space: nowrap; }
+/* importar extrato da B3 */
+.b3-bloco { display: grid; gap: 6px; padding: 12px; border-radius: var(--raio); background: var(--folha-2); margin-bottom: 10px; }
+.b3-bloco .dica { margin: 0; }
+.b3-lista { display: grid; gap: 4px; max-height: 220px; overflow-y: auto; font-size: 0.86rem; }
+.b3-lista .cc-linha { gap: 10px; }
+.b3-lista small { color: var(--tinta-3); }
+.b3-op { cursor: pointer; }
+.b3-op input { margin: 0 4px 0 0; vertical-align: -2px; }
+.passos { margin: 0 0 12px; padding-left: 22px; display: grid; gap: 6px; font-size: 0.9rem; color: var(--tinta-2); line-height: 1.4; }
+.passos b { color: var(--tinta); }

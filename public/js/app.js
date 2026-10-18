@@ -1401,8 +1401,6 @@ function htmlResumoProventos() {
   const totalExtras = somaDe(extras);
   const por = proventosPorTipo(xs);
   const tipos = TIPOS_PROV_ORDEM.filter((k) => por[k] > 0);
-  const porExtra = proventosPorTipo(extras);
-  const tiposExtra = TIPOS_PROV_ORDEM.filter((k) => porExtra[k] > 0);
   // por ativo, com a divisão por tipo de cada um
   const porAtivo = new Map();
   for (const p of xs) {
@@ -1424,25 +1422,32 @@ function htmlResumoProventos() {
   }
   return `
     <section class="bloco pv-resumo">
-      <div class="bloco-cab">
-        <div><h2>Proventos ${PV_ANO === 'tudo' ? 'desde o início' : `em ${PV_ANO}`}</h2>
-          <small class="sub-cab">${totalExtras > 0 ? 'Total recebido ' : ''}<b class="pv-total">${R(round2(total + totalExtras))}</b></small></div>
-        <div class="seg seg-rola" role="group" aria-label="Ano">${[...anos, 'tudo'].map((a) => `<button type="button" data-pv-ano="${a}" aria-pressed="${PV_ANO === a}">${a === 'tudo' ? 'Tudo' : a}</button>`).join('')}</div>
+      <div class="seg seg-rola pv-anos" role="group" aria-label="Ano">${[...anos, 'tudo'].map((a) => `<button type="button" data-pv-ano="${a}" aria-pressed="${PV_ANO === a}">${a === 'tudo' ? 'Tudo' : a}</button>`).join('')}</div>
+
+      <div class="pv-hero">
+        <small>${totalExtras > 0 ? 'Total recebido' : 'Proventos'} ${PV_ANO === 'tudo' ? 'desde o início' : `em ${PV_ANO}`}</small>
+        <b class="pv-hero-valor num">${R(round2(total + totalExtras))}</b>
+        ${totalExtras > 0 ? `
+        <div class="pv-hero-barra" role="img" aria-label="Proventos e outros créditos"><i class="pv-dividendo" style="width:${(total / (total + totalExtras)) * 100}%"></i><i class="pv-outro" style="width:${(totalExtras / (total + totalExtras)) * 100}%"></i></div>
+        <div class="pv-hero-soma">
+          <div><span><i class="sw pv-dividendo"></i>Proventos</span><b class="num">${R(total)}</b></div>
+          <em aria-hidden="true">+</em>
+          <div><span><i class="sw pv-outro"></i>Outros créditos</span><b class="num">${R(totalExtras)}</b></div>
+        </div>` : `<span class="pv-hero-sub">${xs.length} ${xs.length === 1 ? 'pagamento' : 'pagamentos'}</span>`}
       </div>
 
-      ${total > 0 ? barraTipos(por, total) : ''}
-      <div class="pv-tipos">
-        <div class="pv-tipo pv-tipo-total"><i class="sw pv-total-sw"></i><span>Proventos</span><b class="num">${R(total)}</b><small>${xs.length} ${xs.length === 1 ? 'pagamento' : 'pagamentos'}</small></div>
-        ${tipos.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span title="${esc(TIPOS_PROVENTO[k])}">${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])}</span><b class="num">${R(por[k])}</b><small>${pctDe(por[k])}</small></div>`).join('')}
-      </div>
+      ${total > 0 ? `<div class="pv-secao">
+        <div class="pv-secao-cab"><h3>Proventos</h3><span><b class="num">${R(total)}</b> · ${xs.length} ${xs.length === 1 ? 'pagamento' : 'pagamentos'}</span></div>
+        ${barraTipos(por, total)}
+        <div class="pv-tipos">
+          ${tipos.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span title="${esc(TIPOS_PROVENTO[k])}">${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])}</span><b class="num">${R(por[k])}</b><small>${pctDe(por[k])}</small></div>`).join('')}
+        </div>
+      </div>` : ''}
       ${semTipo.length ? `<p class="aviso pv-aviso"><b>${R(semTipo.reduce((s, p) => s + Number(p.valor), 0))}</b> vieram da planilha antiga só com o total do mês, sem ativo nem tipo. Com o informe de rendimentos do banco dá para separar.</p>` : ''}
 
-      ${totalExtras > 0 ? `<div class="pv-extras">
-        <div class="pv-tipo pv-tipo-total pv-extras-total"><i class="sw pv-outro"></i><span>Outros créditos <small class="pv-nota">frações, resgates</small></span><b class="num">${R(totalExtras)}</b><small>${extras.length} ${extras.length === 1 ? 'lançamento' : 'lançamentos'}</small></div>
-        <div class="pv-tipos">
-          ${tiposExtra.map((k) => `<div class="pv-tipo"><i class="sw pv-${k}"></i><span title="${esc(TIPOS_PROVENTO[k])}">${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])}</span><b class="num">${R(porExtra[k])}</b><small>${pctDe(porExtra[k], totalExtras)}</small></div>`).join('')}
-        </div>
-        <div class="pv-extras-lista">${[...extrasPorAtivo.entries()].sort((a, b) => Object.values(b[1]).reduce((s, v) => s + v, 0) - Object.values(a[1]).reduce((s, v) => s + v, 0)).map(([t, a]) => `<div class="cc-linha"><span><b>${esc(t)}</b> <small>${TIPOS_PROV_ORDEM.filter((k) => a[k] > 0).map((k) => esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])).join(' · ')}</small></span><span class="num">${R(Object.values(a).reduce((s, v) => s + v, 0))}</span></div>`).join('')}</div>
+      ${totalExtras > 0 ? `<div class="pv-secao">
+        <div class="pv-secao-cab"><h3>Outros créditos</h3><span><b class="num">${R(totalExtras)}</b> · frações, resgates</span></div>
+        <div class="pv-extras-lista">${[...extrasPorAtivo.entries()].sort((a, b) => Object.values(b[1]).reduce((s, v) => s + v, 0) - Object.values(a[1]).reduce((s, v) => s + v, 0)).map(([t, a]) => `<div class="pv-extra"><span><b>${esc(t)}</b><small>${TIPOS_PROV_ORDEM.filter((k) => a[k] > 0).map((k) => esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])).join(' · ')}</small></span><b class="num">${R(Object.values(a).reduce((s, v) => s + v, 0))}</b></div>`).join('')}</div>
       </div>` : ''}
 
       ${total > 0 ? (() => {

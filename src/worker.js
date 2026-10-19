@@ -13,7 +13,7 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS proventos_data ON proventos(data)`,
 ];
 const CHAVES_CONFIG = new Set(['ajustes', 'bancos', 'plano']);
-const TIPOS = new Set(['acao', 'fii', 'etf', 'bdr', 'tesouro']);
+const TIPOS = new Set(['acao', 'fii', 'etf', 'bdr', 'tesouro', 'rf']);
 
 let schemaPronto = false;
 async function garantirSchema(db) {

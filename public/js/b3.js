@@ -132,6 +132,31 @@ export function lerMovimentacao(linhas, ctx = {}) {
       continue;
     }
 
+    // Renda fixa: "CDB - CDB2241CUAJ - MERCADO CREDITO SOCIEDADE…", "LCA - 20C01038167 - BANCO ORIGINAL S/A"
+    const rfm = produto.match(/^(CDB|LCA|LCI|LC|CRI|CRA|DEB|RDB|LF)\s*-\s*([A-Z0-9]+)\s*-\s*(.+)$/i);
+    if (rfm) {
+      const tRF = tickerRF(rfm[1], rfm[2], rfm[3]);
+      const base = { liq: data, data, ticker: tRF, original: tRF, tipo: 'rf', inst, qtdB3: qtd, fator: 1 };
+      const pu = qtd > 0 && valor > 0 ? valor / qtd : preco > 0 ? preco : null; // o valor da operação é exato; o PU vem arredondado (0,01)
+      if (qtd > 0 && mov.startsWith('compra') && pu) {
+        operacoes.push({ ...base, lado: credito ? 'C' : 'V', rotulo: credito ? 'compra' : 'resgate', precoB3: pu, valor: round2(valor > 0 ? valor : qtd * pu) });
+        continue;
+      }
+      if (qtd > 0 && /^(vencimento|resgate)/.test(mov)) {
+        // a B3 não traz quanto foi pago no vencimento: entra pelo custo, para zerar a posição (dá para corrigir no Histórico)
+        operacoes.push({ ...base, lado: 'V', rotulo: 'vencimento', precoB3: pu, valor: pu ? round2(qtd * pu) : null, peloCusto: !pu });
+        continue;
+      }
+      if (qtd > 0 && mov.startsWith('transferencia')) {
+        // troca de corretora: sai de uma (venda) e entra na outra (compra), pelo custo
+        operacoes.push({ ...base, lado: credito ? 'C' : 'V', rotulo: credito ? 'transferência (entrada)' : 'transferência (saída)', precoB3: null, valor: null, peloCusto: true, transf: true });
+        continue;
+      }
+      const rotulo = `${rfm[1].toUpperCase()} (${nome.toLowerCase()})`;
+      ignorados[rotulo] = (ignorados[rotulo] || 0) + 1;
+      continue;
+    }
+
     const original = produto.split(' - ')[0].trim().toUpperCase();
     const ehTicker = /^[A-Z][A-Z0-9]{3}\d{1,2}[A-Z]?$/.test(original); // B3SA3 também
     const ticker = ehTicker ? normalizarTicker(original, conhecidos) : original;
@@ -152,7 +177,26 @@ export function lerMovimentacao(linhas, ctx = {}) {
     const rotulo = ehTicker ? nome : `${produto.split(' - ')[0].trim()} (${nome.toLowerCase()})`; // CDB, LCA, Futuro…: o app não acompanha
     ignorados[rotulo] = (ignorados[rotulo] || 0) + 1;
   }
-  return { proventos, operacoes, avisos, ignorados };
+  // renda fixa sem valor (vencimento, transferência): preço médio das compras até aquele dia
+  const anteriores = [...operacoes, ...(ctx.compras || []).map((c) => ({ ...c, liq: c.data, precoB3: Number(c.preco), qtdB3: Number(c.qtd), lado: c.lado || 'C' }))];
+  for (const o of operacoes.filter((x) => x.tipo === 'rf' && x.peloCusto)) {
+    const cs = anteriores.filter((c) => c.ticker === o.ticker && c.lado === 'C' && !c.transf && c.precoB3 > 0 && c.liq <= o.liq);
+    const q = cs.reduce((s2, c) => s2 + c.qtdB3, 0);
+    if (q > 0) { o.precoB3 = cs.reduce((s2, c) => s2 + c.qtdB3 * c.precoB3, 0) / q; o.valor = round2(o.qtdB3 * o.precoB3); }
+  }
+  const semCompra = operacoes.filter((o) => o.tipo === 'rf' && !(o.precoB3 > 0));
+  for (const o of semCompra) avisos.push({ data: o.data, ticker: o.ticker, nome: `${o.rotulo[0].toUpperCase()}${o.rotulo.slice(1)} sem a compra no extrato (é de antes)`, qtd: o.qtdB3, credito: false, rf: true });
+  return { proventos, operacoes: operacoes.filter((o) => !semCompra.includes(o)), avisos, ignorados };
+}
+
+const LIXO_EMISSOR = new Set(['SA', 'S/A', 'S.A.', 'S.A', 'BANCO', 'SOCIEDADE', 'FINANCIAMENTO', 'INVESTIMENTO', 'INVESTIMENTOS', 'E', 'DE', 'DO', 'DA', 'MULTIPLO', 'MÚLTIPLO', 'LTDA', 'CFI', '-', '–']);
+/** Nome curto do título de renda fixa: "CDB Mercado Credito 2241CUAJ", "LCA Original 20C01038167". */
+export function tickerRF(tipo, codigo, emissor) {
+  const t = tipo.toUpperCase();
+  const ws = [...new Set(String(emissor).toUpperCase().split(/\s+/).filter((w) => w && !LIXO_EMISSOR.has(w)))].slice(0, 2);
+  const nome = ws.map((w) => (w.length <= 3 ? w : w[0] + w.slice(1).toLowerCase())).join(' ');
+  const cod = String(codigo).toUpperCase().replace(new RegExp(`^${t}`), '');
+  return [t, nome, cod].filter(Boolean).join(' ');
 }
 
 const DIA = 86400000;
@@ -215,12 +259,12 @@ export function novidades(lido, existentes) {
   const operacoes = faltam.map((o) => ({
     ...o,
     qtd: round2(o.qtdB3 * o.fator * 1e6) / 1e6, // quantidade de hoje
-    preco: o.lado === 'B' ? 0 : Math.round((o.precoB3 / o.fator) * 1e4) / 1e4,
+    preco: o.lado === 'B' ? 0 : o.tipo === 'rf' ? Math.round(o.precoB3 * 1e8) / 1e8 : Math.round((o.precoB3 / o.fator) * 1e4) / 1e4, // renda fixa: PU com muitas casas (0,0101313)
   }));
   // avisos de eventos que o app já registrou (ajuste ou bonificação perto da data, ou desdobramento conhecido) não aparecem
   // e eventos antigos (mais de um mês antes do último registro do app) já foram tratados
   const ultimo = [...(existentes.compras || []), ...provs].reduce((m, x) => (x.data > m ? x.data : m), '');
-  const avisos = (lido.avisos || []).filter((a) => (!ultimo || dias(ultimo, a.data) <= 31) && !DESDOBRAMENTOS.some((d) => d.ticker === a.ticker && Math.abs(dias(d.data, a.data)) <= 10)
+  const avisos = (lido.avisos || []).filter((a) => a.rf || (!ultimo || dias(ultimo, a.data) <= 31) && !DESDOBRAMENTOS.some((d) => d.ticker === a.ticker && Math.abs(dias(d.data, a.data)) <= 10)
     && !(existentes.compras || []).some((c) => c.ticker === a.ticker && ['A', 'B'].includes(ladoApp(c)) && Math.abs(dias(c.data, a.data)) <= 10));
   return { proventos, operacoes, avisos };
 }

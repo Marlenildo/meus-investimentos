@@ -1,7 +1,7 @@
 import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
   mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, classesPorTicker, liquidoSeVender, dataLiquidacao, emLiquidacao, estimarCompra, fatoresDoMes, precoTesouroEm,
-  PROV_DE_FATO, ehProvDeFato, custoOrdem, TAXA_B3_PADRAO,
+  PROV_DE_FATO, ehProvDeFato, custoOrdem, TAXA_B3_PADRAO, classeDe,
 } from './calc.js';
 import { lerMovimentacao, novidades, bancoDaInstituicao } from './b3.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
@@ -11,7 +11,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.5.0';
+export const VERSAO = '1.6.0';
 const VERSAO_DATA = '2026-10-19';
 
 let S = carregar();
@@ -79,6 +79,22 @@ function toast(msg) {
 
 // ---------- derivados ----------
 const banco = (id = S.ajustes.banco) => S.bancos.find((b) => b.id === id) || S.bancos[0];
+
+// logo de cada banco: o ícone do site dele; sem internet ou sem site conhecido, ficam as iniciais
+const SITE_BANCO = {
+  nubank: 'nubank.com.br', bb: 'bb.com.br', bradesco: 'bradesco.com.br', itau: 'itau.com.br', santander: 'santander.com.br',
+  inter: 'bancointer.com.br', xp: 'xpi.com.br', rico: 'rico.com.vc', btg: 'btgpactual.com', c6: 'c6bank.com.br',
+  toro: 'toroinvestimentos.com.br', orama: 'orama.com.br', nikos: 'nikos.com.br', clear: 'clear.com.br', genial: 'genialinvestimentos.com.br',
+  modal: 'modalmais.com.br', warren: 'warren.com.br', avenue: 'avenue.us', mercadopago: 'mercadopago.com.br', picpay: 'picpay.com',
+};
+function logoBanco(id, nome = banco(id)?.nome || id) {
+  const ini = esc(String(nome || '?').replace(/[^A-Za-zÀ-ú0-9 ]/g, '').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase());
+  const site = SITE_BANCO[id];
+  const img = site ? `<img src="https://www.google.com/s2/favicons?domain=${site}&sz=64" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onload="this.naturalWidth > 16 ? this.classList.add('ok') : this.remove()" onerror="this.remove()">` : '';
+  return `<span class="logo-banco" aria-hidden="true">${ini}${img}</span>`;
+}
+/** Logo + nome do banco, para rodapés de cartão e listas. */
+const comLogo = (id, nome = banco(id)?.nome || id) => `<span class="banco-tag">${logoBanco(id, nome)}${esc(nome)}</span>`;
 const proventosAuto = () => somaProventosMes(S.proventos, mesAnterior(S.plano.mes));
 const aporteMes = () => (S.plano.aporte == null ? Number(S.ajustes.aporteMensal) || 0 : S.plano.aporte);
 const proventosMes = () => (S.plano.proventosManual == null ? proventosAuto() : S.plano.proventosManual);
@@ -254,6 +270,7 @@ function pintarPrecos() {
 function adivinharTipo(cod) {
   const c = cod.trim().toUpperCase();
   if (/^TESOURO/.test(c)) return 'tesouro';
+  if (/^(CDB|LCA|LCI|LC|CRI|CRA|DEB|RDB)\b/.test(c)) return 'rf';
   if (/^[A-Z]{4}(32|33|34|35|39)$/.test(c)) return 'bdr';
   if (/^(BOVA|IVVB|SMAL|HASH|DIVO|NASD|XINA|GOLD|SPXI|ACWI|BOVV|PIBB|FIND|MATB)11$/.test(c)) return 'etf';
   if (/^[A-Z]{4}11$/.test(c)) return 'fii';
@@ -579,7 +596,7 @@ function abrirRegistrar() {
 // ---------- aba Carteira ----------
 // ---------- um gráfico só: investido por tipo + proventos, por dia, mês ou ano ----------
 const NOME_CURTO_PROV = { rendimento: 'Rendimentos', atualizacao: 'Correção', fracao: 'Frações', resgate: 'Resgate' };
-const NOME_CLASSE = { acao: 'de ações', fii: 'de FIIs', tesouro: 'do Tesouro', outros: 'de outros' };
+const NOME_CLASSE = { acao: 'de ações', fii: 'de FIIs', tesouro: 'do Tesouro', rf: 'de renda fixa', outros: 'de outros' };
 const TIPOS_PROV_ORDEM = ['dividendo', 'jcp', 'rendimento', 'juros', 'atualizacao', 'fracao', 'resgate', 'outro'];
 const SERIES = [
   { k: 'prov', nome: 'Proventos' },
@@ -587,15 +604,17 @@ const SERIES = [
   { k: 'fii', nome: 'FIIs' },
   { k: 'outros', nome: 'ETF/BDR' },
   { k: 'tesouro', nome: 'Tesouro' },
+  { k: 'rf', nome: 'Renda fixa' },
   { k: 'taxa', nome: 'Com taxas' },
 ];
-const PILHA = ['acao', 'fii', 'outros', 'tesouro']; // de baixo para cima
+const PILHA = ['acao', 'fii', 'outros', 'tesouro', 'rf']; // de baixo para cima
 const GRAF_KEY = 'meus-investimentos:grafico';
-const PADRAO_GRAF = { periodo: 'mes', modo: 'periodo', vista: 'detalhado', hist: ['prov', 'acao', 'fii', 'outros', 'tesouro', 'taxa', 'mercado'], sel: null };
+const PADRAO_GRAF = { periodo: 'mes', modo: 'periodo', vista: 'detalhado', hist: ['prov', 'acao', 'fii', 'outros', 'tesouro', 'rf', 'taxa', 'mercado'], sel: null };
 let G = (() => { try { return { ...PADRAO_GRAF, ...JSON.parse(localStorage.getItem(GRAF_KEY) || '{}') }; } catch { return { ...PADRAO_GRAF }; } })();
 if (typeof G.sel !== 'number') G.sel = null;
 if (!G.hist.includes('mercado') && !G.semMercado) G.hist.push('mercado');
 if (!G.hist.includes('taxa') && !G.semTaxa) G.hist.push('taxa');
+if (!G.rfVisto) { if (!G.hist.includes('rf')) G.hist.push('rf'); G.rfVisto = true; } // renda fixa chegou depois: aparece ligada
 const salvarG = () => { try { localStorage.setItem(GRAF_KEY, JSON.stringify(G)); } catch { /* sem armazenamento */ } };
 
 const rotuloCurto = (chave, per) => per === 'ano' ? chave : per === 'mes' ? mesCurto(chave) : `${chave.slice(8, 10)}/${chave.slice(5, 7)}`;
@@ -637,7 +656,7 @@ function linhasDoGrafico(per) {
   const ls = resumoPorPeriodo(d.compras, d.proventos, per);
   if (per === 'dia' || !ls.length) return ls;
   const mapa = new Map(ls.map((l) => [l.chave, l]));
-  const vazio = (k) => ({ chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 }, pv: {} });
+  const vazio = (k) => ({ chave: k, acao: 0, fii: 0, tesouro: 0, rf: 0, outros: 0, total: 0, compras: 0, proventos: 0, tx: { acao: 0, fii: 0, tesouro: 0, rf: 0, outros: 0 }, pv: {} });
   const out = [];
   const hoje = per === 'ano' ? hojeISO().slice(0, 4) : mesDe(hojeISO());
   let k = ls[0].chave;
@@ -662,7 +681,7 @@ async function garantirHistorico() {
   if (HIST || carregandoHist) return;
   if (!N.nuvem.servidor) { HIST = {}; return; }
   carregandoHist = true;
-  const tickers = [...new Set(S.compras.filter((c) => c.tipo !== 'tesouro').map((c) => c.ticker))];
+  const tickers = [...new Set(S.compras.filter((c) => c.tipo !== 'tesouro' && c.tipo !== 'rf').map((c) => c.ticker))];
   const out = {};
   await Promise.all(tickers.map(async (t) => {
     const h = await historicoMensal(t);
@@ -702,9 +721,9 @@ function mercadoAte(ym) {
     pos.set(c.ticker, p);
   }
   for (const [t, p] of pos) if (p.qtd <= 1e-9) pos.delete(t);
-  const porTipo = { acao: 0, fii: 0, outros: 0, tesouro: 0, tes: {} };
+  const porTipo = { acao: 0, fii: 0, outros: 0, tesouro: 0, rf: 0, tes: {} };
   for (const [t, p] of pos) {
-    const grupo = ['acao', 'fii', 'tesouro'].includes(p.tipo) ? p.tipo : 'outros';
+    const grupo = classeDe(p.tipo);
     const preco = precoNoMes(t, p.tipo, ym);
     const v = preco ? p.qtd * preco : p.custo;
     porTipo[grupo] += v;
@@ -735,8 +754,8 @@ function htmlGrafico(largura) {
   const acum = G.modo === 'acumulado';
   let linhas = linhasDoGrafico(per);
   if (acum) {
-    const soma = { acao: 0, fii: 0, outros: 0, tesouro: 0, proventos: 0, extras: 0 };
-    const tx = { acao: 0, fii: 0, outros: 0, tesouro: 0 };
+    const soma = { acao: 0, fii: 0, outros: 0, tesouro: 0, rf: 0, proventos: 0, extras: 0 };
+    const tx = { acao: 0, fii: 0, outros: 0, tesouro: 0, rf: 0 };
     const pv = {};
     const pvc = {};
     const tes = {};
@@ -1263,8 +1282,8 @@ function niceStep(x) {
 }
 
 // ---------- quanto da carteira está em cada tipo (ações, FIIs, Tesouro, BDR, ETF…) ----------
-const NOMES_TIPO = { acao: 'Ações', fii: 'Fundos imobiliários', tesouro: 'Tesouro', bdr: 'BDR', etf: 'ETF' };
-const ORDEM_TIPO = ['acao', 'fii', 'tesouro', 'bdr', 'etf'];
+const NOMES_TIPO = { acao: 'Ações', fii: 'Fundos imobiliários', tesouro: 'Tesouro', rf: 'Renda fixa', bdr: 'BDR', etf: 'ETF' };
+const ORDEM_TIPO = ['acao', 'fii', 'tesouro', 'rf', 'bdr', 'etf'];
 function htmlPorTipo(c) {
   const g = new Map();
   for (const l of c.linhas) {
@@ -1321,6 +1340,7 @@ function renderCarteira() {
       const desc = lq.total.ir + lq.total.iof + lq.total.taxas;
       const partes = [
         lq.porTipo.tesouro.ir ? `IR do Tesouro ${R(lq.porTipo.tesouro.ir + lq.porTipo.tesouro.iof)}` : '',
+        lq.porTipo.rf?.ir ? `IR de renda fixa ${R(lq.porTipo.rf.ir + lq.porTipo.rf.iof)}` : '',
         lq.porTipo.acao.ir ? `IR de ações ${R(lq.porTipo.acao.ir)}` : lq.acoesIsentas ? 'ações isentas (até R$ 20 mil no mês)' : '',
         lq.porTipo.fii.ir ? `IR de FIIs ${R(lq.porTipo.fii.ir)}` : lq.porTipo.fii.bruto ? 'FIIs sem lucro, sem IR' : '',
         lq.porTipo.outros.ir ? `IR de ETF/BDR ${R(lq.porTipo.outros.ir)}` : '',
@@ -1353,14 +1373,14 @@ const ICONE_LIXO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 
 /** Uma compra como card: toque em qualquer lugar para editar; lixeira pede confirmação. */
 let VENDAS = new Map(); // resultado de cada venda, recalculado a cada desenho da lista
-const unidade = (tipo, q) => (tipo === 'tesouro' ? (q === 1 ? 'título' : 'títulos') : q === 1 ? 'cota' : 'cotas');
+const unidade = (tipo, q) => (tipo === 'tesouro' ? (q === 1 ? 'título' : 'títulos') : tipo === 'rf' ? (q === 1 ? 'unidade' : 'unidades') : q === 1 ? 'cota' : 'cotas');
 
 function htmlCardCompra(x) {
   const lado = ladoDe(x);
   if (lado !== 'C') return htmlCardOperacao(x, lado);
   const tes = x.tipo === 'tesouro';
   const total = x.qtd * x.preco + (x.custo || 0);
-  const quando = x.importado ? `${nomeMesAno(mesDe(x.data))} · da planilha` : `${dataBR(x.data)} · ${esc(banco(x.banco)?.nome || x.banco || '')}`;
+  const quando = x.importado ? `${nomeMesAno(mesDe(x.data))} · da planilha` : `${dataBR(x.data)} · ${comLogo(bancoDe(x))}`;
   const liq = dataLiquidacao(x);
   const pendente = liq > hojeISO() ? `<span class="cc-tag cc-liq" title="A B3 liquida a compra em dois dias úteis; até lá ela não aparece na custódia do banco">em liquidação · entra ${dataBR(liq).slice(0, 5)}</span>` : '';
   return `<div class="card-compra" role="button" tabindex="0" data-edit-compra="${x.id}" aria-label="Editar compra de ${esc(x.ticker)}, ${dataBR(x.data)}">
@@ -1390,7 +1410,7 @@ function htmlCardOperacao(x, lado) {
     <div class="cc-info">
       <div class="cc-linha"><span class="cc-tit"><b class="cc-ticker">${esc(x.ticker)}</b><span class="cc-op">${nome}</span></span><span class="cc-total num">${venda ? R(v?.recebido ?? x.qtd * x.preco) : `${sinal}${fmtQtd(Math.abs(x.qtd))}`}</span></div>
       <div class="cc-linha cc-sub"><span>${venda ? `−${fmtQtd(x.qtd)} ${unidade(x.tipo, x.qtd)} × ${R(x.preco)}` : lado === 'A' ? `${sinal}${fmtQtd(Math.abs(x.qtd))} ${unidade(x.tipo, Math.abs(x.qtd))}, mesmo valor investido` : `${fmtQtd(x.qtd)} ${unidade(x.tipo, x.qtd)} sem custo`}</span>${venda && v ? `<span class="cc-res ${cor}">${v.resultado >= 0 ? '+' : '−'}${R(Math.abs(v.resultado))}</span>` : ''}</div>
-      <div class="cc-linha cc-rodape"><small>${dataBR(x.data)}${venda && v ? ` · preço médio ${R(v.precoMedio)}` : ''}${x.obs ? ` · ${esc(x.obs)}` : ''}</small>
+      <div class="cc-linha cc-rodape"><small>${dataBR(x.data)} · ${comLogo(bancoDe(x))}${venda && v ? ` · preço médio ${R(v.precoMedio)}` : ''}${x.obs ? ` · ${esc(x.obs)}` : ''}</small>
         <span class="cc-acoes">
           <button type="button" class="ic-btn" data-edit-compra="${x.id}" title="Editar" aria-label="Editar">${ICONE_EDITAR}</button>
           <button type="button" class="ic-btn perigo" data-del-compra="${x.id}" title="Remover" aria-label="Remover">${ICONE_LIXO}</button>
@@ -1726,7 +1746,7 @@ function renderAjustes() {
         <div class="tabela-wrap"><table>
           <thead><tr><th>Banco</th><th class="r">Corretagem (R$)</th><th class="r">B3 (%)</th><th class="r">Tesouro (%)</th></tr></thead>
           <tbody>${S.bancos.map((b) => `<tr>
-            <td>${esc(b.nome)}</td>
+            <td>${comLogo(b.id, b.nome)}</td>
             <td class="r"><input class="num preco-input" data-bk="${b.id}" data-campo="corretagem" inputmode="decimal" value="${Number(b.corretagem).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}" aria-label="Corretagem ${esc(b.nome)}"></td>
             <td class="r"><input class="num preco-input" data-bk="${b.id}" data-campo="taxaB3" inputmode="decimal" value="${pctTxt(b.taxaB3)}" aria-label="Taxa B3 ${esc(b.nome)}"></td>
             <td class="r"><input class="num preco-input" data-bk="${b.id}" data-campo="taxaTesouro" inputmode="decimal" value="${pctTxt(b.taxaTesouro)}" aria-label="Taxa Tesouro ${esc(b.nome)}"></td>
@@ -1853,7 +1873,7 @@ async function lerExtratoB3(f) {
   const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: true });
   const linhas = wb.SheetNames.flatMap((n) => XLSX.utils.sheet_to_json(wb.Sheets[n], { defval: '', raw: true }));
   const tipos = new Map([...S.compras.map((c) => [c.ticker, c.tipo]), ...S.ativos.map((a) => [a.ticker, a.tipo])]);
-  const lido = lerMovimentacao(linhas, { tipos });
+  const lido = lerMovimentacao(linhas, { tipos, compras: S.compras });
   if (!lido.proventos.length && !lido.operacoes.length && !Object.keys(lido.ignorados).length) {
     throw new Error('Esse arquivo não parece o extrato de Movimentação da B3.');
   }
@@ -1874,8 +1894,8 @@ function abrirResumoB3(res) {
   for (const x of [...operacoes, ...proventos]) x.banco = qualBanco(x.inst);
   const nomeBanco = (id) => (S.bancos.find((b) => b.id === id) || novosBancos.get(id))?.nome || id;
   const variosBancos = new Set([...lido.operacoes, ...lido.proventos].map((x) => qualBanco(x.inst))).size > 1;
-  const tagBanco = (id) => (variosBancos ? ` · ${esc(nomeBanco(id))}` : '');
-  const contagem = (xs) => [...xs.reduce((m, x) => m.set(x.banco, (m.get(x.banco) || 0) + 1), new Map())].map(([id, n]) => `${esc(nomeBanco(id))} ${n}`).join(' · ');
+  const tagBanco = (id) => (variosBancos ? ` · ${comLogo(id, nomeBanco(id))}` : '');
+  const contagem = (xs) => [...xs.reduce((m, x) => m.set(x.banco, (m.get(x.banco) || 0) + 1), new Map())].map(([id, n]) => `${comLogo(id, nomeBanco(id))} ${n}`).join(' · ');
   const jaTinha = lido.proventos.length - proventos.length + lido.operacoes.length - operacoes.length;
   const somaP = round2(proventos.reduce((s, p) => s + p.valor, 0));
   const porTipo = proventosPorTipo(proventos);
@@ -1895,8 +1915,9 @@ function abrirResumoB3(res) {
       ${operacoes.length ? `<div class="b3-bloco">
         <div class="cc-linha"><b>${operacoes.length} ${operacoes.length === 1 ? 'operação que não está' : 'operações que não estão'} no app</b></div>
         <small class="dica">Compras e vendas liquidadas na B3 sem registro aqui. A data é a do pregão (dois dias úteis antes da liquidação) e a taxa é estimada pelo seu banco; no Tesouro, data e preço são os exatos da B3, sem taxa. Desmarque o que não quiser.</small>
-        <div class="b3-lista">${operacoes.map((o, i) => `<label class="cc-linha b3-op"><span><input type="checkbox" data-b3-op="${i}" checked> ${dataBR(o.data).slice(0, 5)}${o.data.slice(0, 4) !== String(new Date().getFullYear()) ? `/${o.data.slice(2, 4)}` : ''} <b>${esc(o.ticker)}</b> <small>${o.lado === 'V' ? 'venda' : o.lado === 'B' ? 'bonificação' : 'compra'} · ${fmtQtd(o.qtd)}${o.lado === 'B' ? ' cotas' : ` × ${R(o.preco)}`}${o.original !== o.ticker ? ` · era ${esc(o.original)}` : ''}${o.fator !== 1 ? ' · já com o desdobramento' : ''}${tagBanco(o.banco)}</small></span><span class="num">${o.lado === 'B' ? '' : R(o.qtd * o.preco)}</span></label>`).join('')}</div>
+        <div class="b3-lista">${operacoes.map((o, i) => `<label class="cc-linha b3-op"><span><input type="checkbox" data-b3-op="${i}" checked> ${dataBR(o.data).slice(0, 5)}${o.data.slice(0, 4) !== String(new Date().getFullYear()) ? `/${o.data.slice(2, 4)}` : ''} <b>${esc(o.ticker)}</b> <small>${o.rotulo || (o.lado === 'V' ? 'venda' : o.lado === 'B' ? 'bonificação' : 'compra')}${o.peloCusto && !o.transf ? ' (pelo custo)' : ''} · ${fmtQtd(o.qtd)}${o.lado === 'B' ? ' cotas' : ` × ${R(o.preco)}`}${o.original !== o.ticker ? ` · era ${esc(o.original)}` : ''}${o.fator !== 1 ? ' · já com o desdobramento' : ''}${tagBanco(o.banco)}</small></span><span class="num">${o.lado === 'B' ? '' : R(o.qtd * o.preco)}</span></label>`).join('')}</div>
       </div>` : ''}
+      ${operacoes.some((o) => o.tipo === 'rf') ? '<p class="dica">Renda fixa (CDB, LCA…): a B3 não informa quanto você recebeu no vencimento, então ele entra pelo valor aplicado, sem rendimento. Se quiser o ganho certo, corrija o valor no Histórico. Títulos ainda abertos ficam pelo valor aplicado até você informar o valor atual.</p>' : ''}
       ${res.avisos.length ? `<p class="aviso">Confira à mão, o app não ajusta sozinho: ${res.avisos.map((a) => `${esc(a.nome)} de ${esc(a.ticker)} em ${dataBR(a.data)}`).join('; ')}.</p>` : ''}
       ${ignorados.length ? `<p class="dica">Sem efeito no app: ${ignorados.map(([n, q]) => `${esc(n)}${q > 1 ? ` (${q})` : ''}`).join(', ')}.</p>` : ''}
       <div class="acoes"><span class="esp"></span><button class="btn" value="cancelar" formnovalidate>${proventos.length || operacoes.length ? 'Cancelar' : 'Fechar'}</button>${proventos.length || operacoes.length ? '<button class="btn prim" value="ok">Adicionar ao app</button>' : ''}</div>
@@ -1909,9 +1930,9 @@ function abrirResumoB3(res) {
     const criar = [...novosBancos.values()].filter((b) => usados.has(b.id));
     if (criar.length) { S.bancos.push(...criar); persist('bancos'); }
     const novas = marcadas.map((o) => {
-      const { inst, ...op } = o;
+      const { inst, rotulo, peloCusto, transf, ...op } = o;
       const bk = banco(op.banco);
-      return { id: uid(), data: op.data, ticker: op.ticker, tipo: S.ativos.find((a) => a.ticker === op.ticker)?.tipo || op.tipo, qtd: op.qtd, preco: op.preco, custo: op.lado === 'B' || op.tipo === 'tesouro' ? 0 : custoOrdem({ tipo: op.tipo }, op.qtd, op.preco, bk), banco: bk.id, ...(op.lado !== 'C' ? { lado: op.lado } : {}) };
+      return { id: uid(), data: op.data, ticker: op.ticker, tipo: S.ativos.find((a) => a.ticker === op.ticker)?.tipo || op.tipo, qtd: op.qtd, preco: op.preco, custo: op.lado === 'B' || op.tipo === 'tesouro' || op.tipo === 'rf' ? 0 : custoOrdem({ tipo: op.tipo }, op.qtd, op.preco, bk), banco: bk.id, ...(op.lado !== 'C' ? { lado: op.lado } : {}) };
     });
     proventos.forEach((p) => delete p.inst);
     if (novas.length) { S.compras.push(...novas); N.adicionarCompras(novas); }
@@ -2105,11 +2126,10 @@ function renderNuvem() {
   if (bloco && !bloco.contains(document.activeElement)) bloco.innerHTML = htmlConta();
 }
 
-// rodapé: ano corrente e versão
+// rodapé: versão, como nos outros apps
 {
-  const ano = $('#rod-ano'), ver = $('#rod-versao');
-  if (ano) ano.textContent = String(new Date().getFullYear());
-  if (ver) { ver.textContent = VERSAO; ver.parentElement.title = `Publicada em ${dataBR(VERSAO_DATA)}`; }
+  const ver = $('#versao');
+  if (ver) { ver.textContent = `Meus Investimentos v${VERSAO}`; ver.title = `Publicada em ${dataBR(VERSAO_DATA)}`; }
 }
 
 function render() {
@@ -2138,7 +2158,7 @@ function garantirAtivosDaCarteira() {
   const emCarteira = new Set(carteira(S.compras, [], []).linhas.map((l) => l.ticker)); // vendidos por inteiro não voltam
   let mudou = false;
   for (const c of S.compras) {
-    if (tem.has(c.ticker) || !emCarteira.has(c.ticker)) continue;
+    if (tem.has(c.ticker) || !emCarteira.has(c.ticker) || c.tipo === 'rf') continue; // CDB/LCA não entram na lista de compra do mês
     S.ativos.push({ id: uid(), ticker: c.ticker, tipo: c.tipo || 'acao', nome: c.tipo === 'tesouro' ? c.ticker : '', preco: null, precoEm: null, fonte: null });
     tem.add(c.ticker); mudou = true;
   }

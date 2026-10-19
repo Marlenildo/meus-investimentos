@@ -9,7 +9,13 @@ export const TIPOS = {
   etf: { nome: 'ETF', bolsa: true, passo: 1 },
   bdr: { nome: 'BDR', bolsa: true, passo: 1 },
   tesouro: { nome: 'Tesouro', bolsa: false, passo: 0.01 },
+  rf: { nome: 'Renda fixa (CDB, LCA…)', bolsa: false, passo: 1 },
 };
+
+/** Classe para os gráficos e somas: ação, FII, Tesouro, renda fixa ou outros (ETF, BDR). */
+export const classeDe = (tipo) => (['acao', 'fii', 'tesouro', 'rf'].includes(tipo) ? tipo : 'outros');
+/** LCA e LCI não pagam IR. */
+const isentoIR = (ticker) => /^LC[AI]\b/i.test(String(ticker));
 
 export const TIPOS_PROVENTO = {
   dividendo: 'Dividendos',
@@ -223,7 +229,7 @@ export const CHAVE_PERIODO = {
 /** Classe de cada ativo (ação, FII, tesouro, outros) pelo que foi comprado. */
 export function classesPorTicker(compras) {
   const m = new Map();
-  for (const c of compras) m.set(c.ticker, c.tipo === 'acao' || c.tipo === 'fii' || c.tipo === 'tesouro' ? c.tipo : 'outros');
+  for (const c of compras) m.set(c.ticker, classeDe(c.tipo));
   return m;
 }
 
@@ -231,7 +237,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
   const chave = CHAVE_PERIODO[periodo] || CHAVE_PERIODO.mes;
   const m = new Map();
   const linha = (k) => {
-    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, outros: 0, total: 0, compras: 0, proventos: 0, extras: 0, tx: { acao: 0, fii: 0, tesouro: 0, outros: 0 }, pv: {}, pvc: {}, tes: {} });
+    if (!m.has(k)) m.set(k, { chave: k, acao: 0, fii: 0, tesouro: 0, rf: 0, outros: 0, total: 0, compras: 0, proventos: 0, extras: 0, tx: { acao: 0, fii: 0, tesouro: 0, rf: 0, outros: 0 }, pv: {}, pvc: {}, tes: {} });
     return m.get(k);
   };
   const vendas = processarOperacoes(compras);
@@ -239,7 +245,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
     const lado = ladoDe(c);
     if (semDinheiro(lado)) continue; // bonificação e ajuste não são dinheiro investido
     const l = linha(chave(c.data));
-    const grupo = c.tipo === 'acao' || c.tipo === 'fii' || c.tipo === 'tesouro' ? c.tipo : 'outros';
+    const grupo = classeDe(c.tipo);
     if (lado === 'V') {
       // a venda tira da conta o que aquelas cotas custaram (pelo preço médio)
       const base = vendas.get(c.id)?.custoBase || 0;
@@ -274,7 +280,7 @@ export function resumoPorPeriodo(compras, proventos, periodo = 'mes') {
       acum += l.total;
       return {
         ...l,
-        acao: round2(l.acao), fii: round2(l.fii), tesouro: round2(l.tesouro), outros: round2(l.outros),
+        acao: round2(l.acao), fii: round2(l.fii), tesouro: round2(l.tesouro), rf: round2(l.rf), outros: round2(l.outros),
         total: round2(l.total), proventos: round2(l.proventos), extras: round2(l.extras), acumulado: round2(acum),
         tx: Object.fromEntries(Object.entries(l.tx).map(([k, v]) => [k, round2(v)])),
         pv: Object.fromEntries(Object.entries(l.pv).map(([k, v]) => [k, round2(v)])),
@@ -379,8 +385,9 @@ export function liquidoSeVender(compras, ativos, hoje) {
   for (const c of ordemCron(compras)) {
     const lado = ladoDe(c);
     const q = Number(c.qtd) || 0;
-    if (c.tipo === 'tesouro') {
+    if (c.tipo === 'tesouro' || c.tipo === 'rf') {
       const ls = lotes.get(c.ticker) || [];
+      ls.tipo = c.tipo;
       if (lado === 'C') ls.push({ data: c.data, qtd: q, preco: Number(c.preco), custo: Number(c.custo || 0) });
       else if (lado === 'V') {
         let falta = q;
@@ -402,7 +409,7 @@ export function liquidoSeVender(compras, ativos, hoje) {
     pos.set(c.ticker, p);
   }
   const vazio = () => ({ bruto: 0, custo: 0, lucro: 0, ir: 0, iof: 0, taxas: 0, liquido: 0 });
-  const porTipo = { acao: vazio(), fii: vazio(), outros: vazio(), tesouro: vazio() };
+  const porTipo = { acao: vazio(), fii: vazio(), outros: vazio(), tesouro: vazio(), rf: vazio() };
   const porTicker = {};
   // Tesouro, compra a compra
   for (const [t, ls] of lotes) {
@@ -415,12 +422,12 @@ export function liquidoSeVender(compras, ativos, hoje) {
       const rend = Math.max(0, bruto - custo);
       const dias = diasEntre(l.data, hoje);
       const iof = dias < 30 ? rend * (IOF_TABELA[Math.max(0, dias - 1)] || 0) / 100 : 0;
-      const ir = (rend - iof) * aliquotaRendaFixa(dias);
+      const ir = isentoIR(t) ? 0 : (rend - iof) * aliquotaRendaFixa(dias);
       r.bruto += bruto; r.custo += custo; r.lucro += bruto - custo; r.ir += ir; r.iof += iof;
     }
     r.liquido = r.bruto - r.ir - r.iof;
     porTicker[t] = r;
-    for (const k of Object.keys(r)) porTipo.tesouro[k] += r[k];
+    for (const k of Object.keys(r)) porTipo[ls.tipo === 'rf' ? 'rf' : 'tesouro'][k] += r[k];
   }
   // bolsa, por classe
   for (const [t, p] of pos) {

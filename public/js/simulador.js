@@ -64,7 +64,10 @@ function ultimoAte(lista, d) {
 
 /**
  * Roda a simulação de uma carteira.
- * @param {object} cfg  { inicio: 'AAAA-MM', aporte: número, reinvestir: bool, itens: [{tipo, ticker?, taxa?, peso}] }
+ * @param {object} cfg  { inicio: 'AAAA-MM', aporte: número, proventos: 'dentro' | 'somar' | 'guardar', itens: [{tipo, ticker?, taxa?, peso}] }
+ *   proventos 'dentro': o aporte é o total investido no mês; os proventos do mês anterior pagam parte e do bolso sai só a diferença.
+ *   proventos 'somar':  sai o aporte inteiro do bolso e os proventos do mês anterior entram por cima.
+ *   proventos 'guardar': sai o aporte inteiro do bolso e os proventos ficam com você, fora da carteira.
  * @param {object} dados { precos: {TICKER: {dias, proventos, splits}}, indices: {selic, cdi?, ipca?} }
  */
 export function simular(cfg, dados) {
@@ -113,10 +116,21 @@ export function simular(cfg, dados) {
     ? p.qtd * (ultimoAte(p.dias, d) || 0)
     : p.lotes.reduce((s, l) => s + l.valor, 0));
 
-  let caixa = 0; // sobra das compras (cotas inteiras) e proventos esperando o próximo aporte
-  let provFora = 0; // proventos não reinvestidos (ficam com você)
-  let aportado = 0;
+  const modo = cfg.proventos || (cfg.reinvestir === false ? 'guardar' : 'dentro');
+  let caixa = 0; // sobra das compras (cotas inteiras), fica para o mês seguinte
+  let provPend = 0; // proventos recebidos desde o último aporte, esperando o próximo
+  let provFora = 0; // proventos guardados (ficam com você, fora da carteira)
+  let bolso = 0; // o que de fato saiu do seu bolso
+  let reinvestido = 0; // proventos que entraram nas compras
   const serie = [];
+  // números de cada mês: o que saiu do bolso, proventos reinvestidos e recebidos, e o valor no último dia útil
+  const meses = new Map();
+  const doMes = (d) => {
+    const k = d.slice(0, 7);
+    if (!meses.has(k)) meses.set(k, { mes: k, bolso: 0, reinvestido: 0, proventos: 0, valorFim: 0 });
+    return meses.get(k);
+  };
+  const totalEm = (d) => pos.reduce((s, p) => s + valorItem(p, d), 0) + caixa + provPend + provFora;
   let anterior = null;
 
   for (const d of calendario) {
@@ -133,14 +147,21 @@ export function simular(cfg, dados) {
         if (anterior && pv.data > anterior && p.qtd > 0) {
           const v = p.qtd * pv.valor;
           p.proventos += v;
-          if (cfg.reinvestir) caixa += v; else provFora += v;
+          doMes(d).proventos += v;
+          if (modo === 'guardar') provFora += v; else provPend += v;
         }
       }
     }
     // 3. aporte do mês
     if (aportes.has(d)) {
-      aportado += cfg.aporte;
-      const disponivel = caixa + cfg.aporte;
+      const investir = modo === 'dentro' ? Math.max(cfg.aporte, provPend) : cfg.aporte + provPend;
+      const doBolso = modo === 'dentro' ? Math.max(0, cfg.aporte - provPend) : cfg.aporte;
+      bolso += doBolso;
+      reinvestido += provPend;
+      doMes(d).bolso += doBolso;
+      doMes(d).reinvestido += provPend;
+      provPend = 0;
+      const disponivel = caixa + investir;
       let resta = disponivel;
       const cotasBolsa = [];
       for (const p of pos) {
@@ -168,12 +189,13 @@ export function simular(cfg, dados) {
         }
       }
       caixa = Math.max(0, resta);
-      serie.push({ data: d, aportado, total: pos.reduce((s, p) => s + valorItem(p, d), 0) + caixa + provFora, proventos: pos.reduce((s, p) => s + p.proventos, 0) });
+      serie.push({ data: d, bolso, total: pos.reduce((s, p) => s + valorItem(p, d), 0) + caixa + provPend + provFora, proventos: pos.reduce((s, p) => s + p.proventos, 0) });
     }
+    doMes(d).valorFim = totalEm(d); // o último dia útil do mês fica por último
     anterior = d;
   }
   if (!serie.length || serie[serie.length - 1].data !== fim) {
-    serie.push({ data: fim, aportado, total: pos.reduce((s, p) => s + valorItem(p, fim), 0) + caixa + provFora, proventos: pos.reduce((s, p) => s + p.proventos, 0) });
+    serie.push({ data: fim, bolso, total: pos.reduce((s, p) => s + valorItem(p, fim), 0) + caixa + provPend + provFora, proventos: pos.reduce((s, p) => s + p.proventos, 0) });
   }
 
   const linhas = pos.map((p) => {
@@ -190,13 +212,40 @@ export function simular(cfg, dados) {
   });
   const posicao = linhas.reduce((s, l) => s + l.valor, 0);
   const proventos = linhas.reduce((s, l) => s + l.proventos, 0);
-  const total = posicao + caixa + provFora;
+  const total = posicao + caixa + provPend + provFora;
   const ir = linhas.reduce((s, l) => s + l.ir, 0);
   return {
-    inicio: [...aportes][0], fim, meses: aportes.size, aportado, posicao, caixa, proventos, provFora,
-    total, ganho: total - aportado, ganhoPct: aportado ? total / aportado - 1 : 0,
-    // o ganho total se divide em valorização (preço das cotas ou rendimento da renda fixa) e proventos recebidos
-    valorizacao: total - aportado - proventos, ir, liquido: total - ir,
-    custos: linhas.reduce((s, l) => s + l.custos, 0), linhas, serie,
+    inicio: [...aportes][0], fim, nAportes: aportes.size, modo, aporteMes: cfg.aporte,
+    bolso, reinvestido, investido: bolso + reinvestido, posicao, caixa, provPend, proventos, provFora,
+    // ganho sobre o que saiu do bolso = valorização (preço das cotas, rendimento da renda fixa) + proventos recebidos
+    total, ganho: total - bolso, ganhoPct: bolso ? total / bolso - 1 : 0,
+    valorizacao: total - bolso - proventos, ir, liquido: total - ir,
+    custos: linhas.reduce((s, l) => s + l.custos, 0), linhas, serie, porMes: [...meses.values()],
   };
+}
+
+/**
+ * Junta os meses em períodos ('mes' | 'ano' | 'tudo'). Em cada período:
+ * ganho = valor no fim − valor no início − o que saiu do bolso; valorização = ganho − proventos recebidos.
+ * Somando os períodos dá exatamente o total da simulação.
+ */
+export function resumoPorPeriodoSim(porMes, periodo) {
+  const chave = (m) => (periodo === 'ano' ? m.slice(0, 4) : periodo === 'tudo' ? 'tudo' : m);
+  const out = [];
+  let valorAntes = 0;
+  for (const m of porMes) {
+    const k = chave(m.mes);
+    let g = out[out.length - 1];
+    if (!g || g.chave !== k) { g = { chave: k, de: m.mes, ate: m.mes, valorIni: valorAntes, bolso: 0, reinvestido: 0, proventos: 0, valorFim: 0 }; out.push(g); }
+    g.ate = m.mes;
+    g.bolso += m.bolso; g.reinvestido += m.reinvestido; g.proventos += m.proventos; g.valorFim = m.valorFim;
+    valorAntes = m.valorFim;
+  }
+  for (const g of out) {
+    g.ganho = g.valorFim - g.valorIni - g.bolso;
+    g.valorizacao = g.ganho - g.proventos;
+    const base = g.valorIni + g.bolso;
+    g.ganhoPct = base ? g.ganho / base : null; // sobre o que já havia mais o que entrou do bolso no período
+  }
+  return out;
 }

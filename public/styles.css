@@ -895,7 +895,11 @@ html, body { overflow-x: clip; }
 .sim-svg .sim-l { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .sim-svg .sim-l-a { stroke: var(--s-acao); }
 .sim-svg .sim-l-b { stroke: var(--s-tes); }
-.sim-svg .sim-l-inv { fill: none; stroke: var(--tinta-3); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.sim-svg .sim-l-inv { fill: none; stroke: var(--tinta-3); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0.85; }
+.sim-svg .sim-li-a { stroke: var(--s-acao); }
+.sim-svg .sim-li-b { stroke: var(--s-tes); }
+.sim-svg .sim-pi-a { fill: var(--s-acao); }
+.sim-svg .sim-pi-b { fill: var(--s-tes); }
 .sim-svg .sim-pt { stroke: var(--folha); stroke-width: 2; }
 .sim-svg .sim-pt-a { fill: var(--s-acao); }
 .sim-svg .sim-pt-b { fill: var(--s-tes); }
@@ -922,3 +926,11 @@ html, body { overflow-x: clip; }
   .sim-comp-cab > span:first-child { display: none; }
   .sim-comp .sim-parte > span:first-child { padding-left: 8px; }
 }
+.sim-comp .num small { white-space: normal; }
+.sim-seg { flex-wrap: wrap; border-radius: 18px; }
+.sim-seg button { height: auto; min-height: 30px; padding: 5px 12px; }
+.sim-tab td small.sim-sub { display: block; font-size: 0.72rem; color: var(--tinta-3); font-weight: 500; }
+.sim-tab td { vertical-align: top; }
+.sim-periodos .seg button { display: inline-flex; align-items: center; gap: 6px; }
+.sim-tab th:first-child, .sim-tab td:first-child { position: sticky; left: 0; z-index: 1; background: var(--folha); }
+.sim-tab td:first-child::after, .sim-tab th:first-child::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 1px; background: var(--linha); }

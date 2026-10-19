@@ -11,6 +11,7 @@ Roda na Cloudflare (grátis): o site, uma API e um banco de dados D1 onde ficam 
 - **Comprar (tela inicial)** — resumo da carteira; aporte do mês + proventos do mês anterior = disponível. Cada ativo mostra quanto você já tem (cotas, preço médio, valor e resultado), o preço atual e os botões − / + / **MÁX** para montar a compra, com o total ao lado. Adicione ou tire ativos ali mesmo. Depois de comprar no banco, **Comprei — registrar** e as cotas entram na carteira. Cotações se atualizam sozinhas a cada 5 minutos.
 - **Histórico** — totais, posição por ativo, gráfico de aportes por mês (com ou sem as taxas) e lista de compras. Cada compra pode ser **editada** (data, cotas, preço pago, taxas e banco): ao escolher a data, o app mostra o fechamento e a faixa de preço daquele pregão, com um toque para usar.
 - **Proventos** — lança dividendos, JCP, rendimentos de FII e juros. Resumo por ano com a divisão por tipo e por ativo; cada provento pode ser editado. O total do mês anterior entra sozinho no aporte.
+- **Simular** — "e se eu tivesse aportado R$ X no 1º dia útil de cada mês desde tal mês?". Monte até duas carteiras (por exemplo, meio a meio BBAS3 e PETR4 contra 100% Tesouro Selic) e compare valor de hoje, ganho, proventos e a evolução mês a mês. Vale para ações, FIIs, ETFs e BDRs (histórico diário e proventos do Yahoo, só cotas inteiras, com as taxas da B3), Tesouro Selic, IPCA+ e Prefixado, CDB e LCI/LCA em % do CDI (taxas do Banco Central). Proventos podem ser reinvestidos ou guardados. A renda fixa é calculada "na curva", sem marcação a mercado; o IR estimado vale só para ela.
 - **Ajustes** — aporte padrão, lista de ativos, custos por banco, backup e status da nuvem.
 
 ## Colocar no ar na Cloudflare (uma vez só)
@@ -80,4 +81,5 @@ public/js/calc.js     cálculos (custos, MÁX, carteira, proventos)
 public/js/store.js    dados no navegador, bancos de referência, backup
 public/js/nuvem.js    conversa com a API e fila de envio
 public/js/cotacoes.js busca de preços
+public/js/simulador.js cálculos do simulador de aportes
 ```

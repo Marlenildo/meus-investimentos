@@ -2,7 +2,7 @@
 // - Serve o site (pasta public/) e a API em /api/*.
 // - Guarda ativos, compras, proventos e ajustes no D1 (binding DB).
 // - Busca cotações no Yahoo Finance (atraso de ~15 min na B3), com a brapi como reserva.
-// - Os dados exigem a senha definida na variável SENHA; /api/saude, /api/cotacoes, /api/historico e /api/preco-dia são públicos.
+// - Os dados exigem a senha definida na variável SENHA; /api/saude, /api/cotacoes, /api/historico, /api/preco-dia e /api/sim/* são públicos.
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS config (chave TEXT PRIMARY KEY, valor TEXT NOT NULL, atualizado_em TEXT)`,
@@ -249,6 +249,74 @@ async function precoDoDia(ticker, dia) {
   return { ticker, erro: ultimoErro?.message || 'sem preço nessa data' };
 }
 
+// ---------- simulador ----------
+const diaSP = (t) => new Date((t - 3 * 3600) * 1000).toISOString().slice(0, 10);
+
+/**
+ * Fechamento diário, proventos (dividendos + JCP, por cota) e desdobramentos desde uma data, para o simulador.
+ * Preços e proventos vêm do Yahoo já corrigidos pelos desdobramentos; os splits vão junto para o app desfazer isso.
+ */
+async function historicoDiario(ticker, de) {
+  const simbolo = `${ticker}.SA`;
+  const p1 = Date.parse(`${de}T00:00:00-03:00`) / 1000 - 15 * 86400;
+  const p2 = Math.floor(Date.now() / 1000) + 86400;
+  let ultimoErro;
+  for (const host of ['query1', 'query2']) {
+    try {
+      const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?interval=1d&period1=${p1}&period2=${p2}&events=div%2Csplit`;
+      const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, cf: { cacheTtl: 3 * 3600, cacheEverything: true } });
+      if (r.status === 404) throw new Error('ticker não encontrado');
+      if (!r.ok) throw new Error(`yahoo ${r.status}`);
+      const res = (await r.json())?.chart?.result?.[0];
+      const ts = res?.timestamp || [];
+      const q = res?.indicators?.quote?.[0] || {};
+      const dias = [];
+      ts.forEach((t, i) => { if (q.close?.[i] != null) dias.push([diaSP(t), Math.round(q.close[i] * 10000) / 10000]); });
+      if (!dias.length) throw new Error('sem preços no período');
+      const proventos = Object.values(res?.events?.dividends || {})
+        .filter((x) => x.amount > 0).map((x) => ({ data: diaSP(x.date), valor: x.amount }))
+        .sort((a, b) => a.data.localeCompare(b.data));
+      const splits = Object.values(res?.events?.splits || {})
+        .filter((x) => x.numerator > 0 && x.denominator > 0)
+        .map((x) => ({ data: diaSP(x.date), fator: x.numerator / x.denominator }))
+        .sort((a, b) => a.data.localeCompare(b.data));
+      return { ticker, nome: res?.meta?.longName || res?.meta?.shortName || null, dias, proventos, splits };
+    } catch (e) {
+      ultimoErro = e;
+      if (e.message === 'ticker não encontrado') break;
+    }
+  }
+  return { ticker, erro: ultimoErro?.message || 'sem histórico' };
+}
+
+// séries do Banco Central (SGS): Selic e CDI diárias (% ao dia), IPCA mensal (% ao mês)
+const SERIES_BCB = { selic: 11, cdi: 12, ipca: 433 };
+async function serieBCB(nome, de) {
+  const br = (iso) => iso.split('-').reverse().join('/');
+  const ate = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+  // o IPCA é mensal: começa um mês antes para cobrir o mês da primeira compra
+  let ini = de;
+  if (nome === 'ipca') {
+    const d = new Date(`${de.slice(0, 7)}-01T12:00:00Z`);
+    d.setUTCMonth(d.getUTCMonth() - 1);
+    ini = d.toISOString().slice(0, 10);
+  }
+  const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.${SERIES_BCB[nome]}/dados?formato=json&dataInicial=${br(ini)}&dataFinal=${br(ate)}`;
+  let ultimoErro;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, cf: { cacheTtl: 6 * 3600, cacheEverything: true } });
+      if (!r.ok) throw new Error(`Banco Central ${r.status}`);
+      const j = await r.json();
+      if (!Array.isArray(j)) throw new Error('Banco Central sem dados');
+      return { serie: nome, dados: j.map((x) => [x.data.split('/').reverse().join('-'), Number(x.valor)]).filter((x) => Number.isFinite(x[1])) };
+    } catch (e) {
+      ultimoErro = e;
+    }
+  }
+  return { serie: nome, erro: ultimoErro?.message || 'sem dados do Banco Central' };
+}
+
 async function cotacoes(tickers, brapiToken) {
   const out = {};
   await Promise.all(tickers.map(async (t) => {
@@ -295,6 +363,18 @@ async function api(req, env, url) {
     const dia = dataISO(url.searchParams.get('d'));
     if (dia > new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10)) return erro(400, 'Essa data ainda não chegou.');
     return json(await precoDoDia(t, dia));
+  }
+
+  // simulador: histórico diário com proventos, e taxas do Banco Central
+  if (caminho === 'sim/precos' && metodo === 'GET') {
+    const t = (url.searchParams.get('t') || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{4,12}$/.test(t)) return erro(400, 'Informe o código em ?t=BBAS3');
+    return json(await historicoDiario(t, dataISO(url.searchParams.get('de'))));
+  }
+  if (caminho === 'sim/indice' && metodo === 'GET') {
+    const s = url.searchParams.get('s');
+    if (!SERIES_BCB[s]) return erro(400, 'Série inválida (use selic, cdi ou ipca).');
+    return json(await serieBCB(s, dataISO(url.searchParams.get('de'))));
   }
 
   const negado = await conferirSenha(req, env);

@@ -852,3 +852,57 @@ html, body { overflow-x: clip; }
 .pt-banco .logo-banco { width: 24px; height: 24px; border-radius: 50%; }
 .pt-banco b { font-variant-numeric: tabular-nums; }
 .pt-banco small { color: var(--tinta-3); }
+
+/* ---------- simulador ---------- */
+.sim-carteiras { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.sim-carteira h2, .sim-h { display: flex; align-items: center; gap: 8px; }
+.sim-soma { color: var(--tinta-3); }
+.sim-itens { display: grid; gap: 8px; }
+.sim-item { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 76px 36px; gap: 8px; align-items: center; }
+.sim-item input { width: 100%; margin: 0; }
+.sim-tipo { min-width: 0; display: grid; }
+.sim-tipo > * { width: 100%; min-width: 0; }
+.sim-taxa, .sim-peso { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sim-taxa small, .sim-peso small { color: var(--tinta-3); font-size: 0.76rem; white-space: nowrap; }
+.sim-taxa input { min-width: 0; text-align: right; }
+.sim-peso input { text-align: right; }
+.sim-ticker { text-transform: uppercase; }
+@media (max-width: 480px) {
+  .sim-item { grid-template-columns: minmax(0, 1fr) 76px 36px; }
+  .sim-tipo { grid-column: 1 / -1; }
+}
+.sim-acoes { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+@media (max-width: 560px) { .sim-acoes .btn { flex: 1; } }
+#sim-saida { display: grid; gap: 16px; }
+#sim-saida:empty { display: none; }
+.sim-veredito { font-size: 0.95rem; }
+.sim-comp { display: grid; gap: 0; }
+.sim-comp > div { display: grid; grid-template-columns: minmax(0, 1fr) repeat(var(--cols), minmax(0, 1.2fr)); gap: 10px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--linha); }
+.sim-comp > div:last-child { border-bottom: 0; }
+.sim-comp > div > span:first-child { font-size: 0.84rem; color: var(--tinta-2); }
+.sim-comp > div > span:not(:first-child), .sim-comp-cab b { text-align: right; }
+.sim-comp-cab b { display: flex; justify-content: flex-end; align-items: center; gap: 6px; font-size: 0.86rem; }
+.sim-comp .num { font-variant-numeric: tabular-nums; }
+.sim-comp .num small { display: block; font-size: 0.76rem; }
+.sim-comp .forte { font: 700 1.05rem var(--f-display); }
+.sim-legenda { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.82rem; color: var(--tinta-2); }
+.sim-legenda span { display: inline-flex; align-items: center; gap: 6px; }
+.sw.sim-sw-a { background: var(--s-acao); }
+.sw.sim-sw-b { background: var(--s-tes); }
+.sw.sim-sw-inv { width: 14px; height: 2px; border-radius: 0; background: repeating-linear-gradient(90deg, var(--tinta-3) 0 4px, transparent 4px 7px); }
+.sim-graf { position: relative; min-height: 210px; touch-action: pan-y; }
+.sim-svg { width: 100%; height: auto; }
+.sim-svg .sim-l { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.sim-svg .sim-l-a { stroke: var(--s-acao); }
+.sim-svg .sim-l-b { stroke: var(--s-tes); }
+.sim-svg .sim-l-inv { fill: none; stroke: var(--tinta-3); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.sim-svg .sim-pt { stroke: var(--folha); stroke-width: 2; }
+.sim-svg .sim-pt-a { fill: var(--s-acao); }
+.sim-svg .sim-pt-b { fill: var(--s-tes); }
+.sim-svg .sim-pt-inv { fill: var(--tinta-3); }
+.sim-svg .sim-mira-l { stroke: var(--linha-forte); stroke-width: 1; }
+.sim-svg .sim-alvo { cursor: crosshair; }
+.sim-dica { position: absolute; top: 0; pointer-events: none; display: grid; gap: 4px; padding: 8px 10px; border-radius: var(--raio-p); background: var(--folha-solida); border: 1px solid var(--linha-forte); box-shadow: var(--sombra); font-size: 0.8rem; white-space: nowrap; z-index: 2; }
+.sim-dica span { display: flex; align-items: center; gap: 6px; color: var(--tinta-2); }
+.sim-dica span b { margin-left: auto; padding-left: 10px; color: var(--tinta); }
+.sim-notas { padding: 0 4px; }

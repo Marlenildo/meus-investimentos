@@ -7,11 +7,12 @@ import { lerMovimentacao, novidades, bancoDaInstituicao } from './b3.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
 import * as N from './nuvem.js';
+import { simular, TIPOS_SIM, seriesNecessarias } from './simulador.js';
 import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.6.2';
+export const VERSAO = '1.7.0';
 const VERSAO_DATA = '2026-10-19';
 
 let S = carregar();
@@ -1696,6 +1697,291 @@ function ligarProventos() {
   ligarRemover('data-del-prov', 'proventos');
 }
 
+// ---------- aba Simular ----------
+// "E se eu tivesse aportado R$ X todo primeiro dia útil do mês desde tal mês?" — compara até duas carteiras.
+const SIM_KEY = 'meus-investimentos:simulador';
+const CORES_SIM = ['a', 'b'];
+const simPadrao = () => ({
+  inicio: '2024-05',
+  aporte: Number(S.ajustes.aporteMensal) || 2000,
+  reinvestir: true,
+  comparar: true,
+  carteiras: [
+    { nome: 'Carteira A', itens: [{ tipo: 'bolsa', ticker: 'BBAS3', peso: 50 }, { tipo: 'bolsa', ticker: 'PETR4', peso: 50 }] },
+    { nome: 'Carteira B', itens: [{ tipo: 'selic', peso: 100 }] },
+  ],
+});
+let SIM = (() => { try { const v = JSON.parse(localStorage.getItem(SIM_KEY) || 'null'); return v?.carteiras?.length === 2 ? v : simPadrao(); } catch { return simPadrao(); } })();
+const salvarSim = () => { try { localStorage.setItem(SIM_KEY, JSON.stringify(SIM)); } catch { /* sem armazenamento */ } };
+let SIM_RES = null; // { cfg, res: [resultado A, resultado B?] }
+let simulando = false;
+const cacheSim = new Map();
+
+async function apiSim(caminho) {
+  if (cacheSim.has(caminho)) return cacheSim.get(caminho);
+  const p = fetch(`/api/${caminho}`, { headers: { Accept: 'application/json' } }).then(async (r) => {
+    const j = await r.json().catch(() => null);
+    if (!r.ok || !j) throw new Error(j?.erro || `erro ${r.status}`);
+    if (j.erro) throw new Error(j.erro);
+    return j;
+  });
+  cacheSim.set(caminho, p);
+  p.catch(() => cacheSim.delete(caminho));
+  return p;
+}
+
+const pesoSoma = (c) => c.itens.reduce((s, it) => s + (Number(it.peso) || 0), 0);
+const fmtPct0 = (v) => `${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+
+function htmlItemSim(it, ci, ii) {
+  const t = TIPOS_SIM[it.tipo] || TIPOS_SIM.bolsa;
+  const meio = it.tipo === 'bolsa'
+    ? `<input class="sim-ticker" data-campo="ticker" value="${esc(it.ticker || '')}" placeholder="PETR4" list="sim-tickers" autocapitalize="characters" spellcheck="false" aria-label="Código do ativo">`
+    : t.taxa
+      ? `<span class="sim-taxa"><input class="num" data-campo="taxa" inputmode="decimal" value="${esc(String(it.taxa ?? t.taxa.padrao).replace('.', ','))}" aria-label="${esc(t.taxa.rotulo)}"><small>${esc(t.taxa.sufixo)}</small></span>`
+      : '<span class="sim-taxa"><small>rende a Selic do dia</small></span>';
+  return `<div class="sim-item" data-c="${ci}" data-i="${ii}">
+    <span class="sim-tipo"><select data-campo="tipo" aria-label="Tipo">${Object.entries(TIPOS_SIM).map(([k, v]) => `<option value="${k}" ${k === it.tipo ? 'selected' : ''}>${esc(v.nome)}</option>`).join('')}</select></span>
+    ${meio}
+    <span class="sim-peso"><input class="num" data-campo="peso" inputmode="decimal" value="${esc(String(it.peso ?? '').replace('.', ','))}" aria-label="Percentual do aporte"><small>%</small></span>
+    <button type="button" class="icone-btn sim-tirar" data-tirar aria-label="Tirar">${ICONE_LIXO}</button>
+  </div>`;
+}
+
+function htmlCarteiraSim(c, ci) {
+  const soma = pesoSoma(c);
+  return `<section class="bloco sim-carteira sim-${CORES_SIM[ci]}" data-carteira="${ci}">
+    <div class="bloco-cab"><h2><i class="sw sim-sw-${CORES_SIM[ci]}"></i>${esc(c.nome)}</h2>
+      <small class="sim-soma ${Math.abs(soma - 100) < 0.01 ? '' : 'var-baixa'}" data-soma="${ci}">${Math.abs(soma - 100) < 0.01 ? 'soma 100%' : `soma ${fmtPct0(soma)} — o app divide na proporção`}</small></div>
+    <div class="sim-itens">${c.itens.map((it, ii) => htmlItemSim(it, ci, ii)).join('')}</div>
+    <div><button type="button" class="btn peq" data-add="${ci}">+ Investimento</button></div>
+  </section>`;
+}
+
+function htmlResultadoSim() {
+  if (!SIM_RES) return '';
+  const { res, cfg } = SIM_RES;
+  const cls = (v) => (v >= 0 ? 'var-alta' : 'var-baixa');
+  const r0 = res[0];
+  const melhor = res.length === 2 ? (res[0].total >= res[1].total ? 0 : 1) : null;
+  const dif = res.length === 2 ? Math.abs(res[0].total - res[1].total) : 0;
+  const temRF = res.some((r) => r.ir > 0.005);
+  return `
+    <section class="bloco sim-res">
+      <div class="bloco-cab"><h2>Resultado</h2><small>${r0.meses} aportes de ${R(cfg.aporte)} · ${dataBR(r0.inicio)} a ${dataBR(r0.fim)}</small></div>
+      ${melhor != null ? `<p class="sim-veredito"><b>${esc(cfg.carteiras[melhor].nome)}</b> teria ${R(dif)} a mais hoje (${pct(res[1 - melhor].total ? dif / res[1 - melhor].total : 0).replace('+', '')}).</p>` : ''}
+      <div class="sim-comp" style="--cols:${res.length}">
+        <div class="sim-comp-cab"><span></span>${res.map((r, i) => `<b><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)}</b>`).join('')}</div>
+        <div><span>Aportado</span>${res.map((r) => `<span class="num">${R(r.aportado)}</span>`).join('')}</div>
+        <div><span>Valor hoje</span>${res.map((r) => `<span class="num forte">${R(r.total)}</span>`).join('')}</div>
+        <div><span>Ganho</span>${res.map((r) => `<span class="num ${cls(r.ganho)}">${R(r.ganho)} <small>${pct(r.ganhoPct)}</small></span>`).join('')}</div>
+        <div><span>Proventos</span>${res.map((r) => `<span class="num">${r.proventos ? R(r.proventos) : '—'}</span>`).join('')}</div>
+        ${temRF ? `<div><span>Se resgatasse hoje <small>(− IR da renda fixa)</small></span>${res.map((r) => `<span class="num">${R(r.liquido)}</span>`).join('')}</div>` : ''}
+      </div>
+    </section>
+
+    <section class="bloco">
+      <div class="bloco-cab"><h2>Evolução</h2>
+        <div class="sim-legenda">${res.map((r, i) => `<span><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)}</span>`).join('')}<span><i class="sw sim-sw-inv"></i>Aportado</span></div></div>
+      <div class="sim-graf" id="sim-graf"></div>
+    </section>
+
+    ${res.map((r, i) => `<section class="bloco">
+      <div class="bloco-cab"><h2 class="sim-h"><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)} · por investimento</h2></div>
+      <div class="tabela-wrap"><table>
+        <thead><tr><th>Investimento</th><th class="r">Aplicado</th><th class="r">Cotas</th><th class="r">Valor hoje</th><th class="r">Proventos</th><th class="r">Resultado</th></tr></thead>
+        <tbody>${r.linhas.map((l) => `<tr><td><b>${esc(l.rotulo)}</b> <small class="dica">${fmtPct0(l.peso * 100)}</small></td><td class="r num">${R(l.aplicado)}</td><td class="r num">${l.qtd != null ? fmtQtd(l.qtd) : '—'}</td><td class="r num">${R(l.valor)}</td><td class="r num">${l.proventos ? R(l.proventos) : '—'}</td><td class="r num ${cls(l.resultado)}">${R(l.resultado)} <small>${pct(l.aplicado ? l.resultado / l.aplicado : null)}</small></td></tr>`).join('')}</tbody>
+        ${r.caixa > 0.005 || r.provFora > 0.005 ? `<tfoot><tr><td colspan="6"><small class="dica">${r.caixa > 0.005 ? `Sobra em caixa (cotas inteiras): ${R(r.caixa)}. ` : ''}${r.provFora > 0.005 ? `Proventos guardados, fora da carteira: ${R(r.provFora)}.` : ''}</small></td></tr></tfoot>` : ''}
+      </table></div>
+    </section>`).join('')}
+
+    <p class="dica sim-notas">Bolsa: compra no fechamento do 1º dia útil do mês, só cotas inteiras, com 0,03% de taxas da B3; proventos do Yahoo (JCP pelo valor bruto). Renda fixa: rendimento dia a dia pela taxa escolhida, sem marcação a mercado e sem a taxa de custódia; o IPCA+ usa uma taxa fixa para todos os aportes. Valores brutos; o IR estimado vale só para a renda fixa (a LCI/LCA é isenta). É uma estimativa, não recomendação de investimento.</p>`;
+}
+
+function renderSimular() {
+  const tickers = [...new Set([...S.ativos, ...S.compras].filter((a) => !['tesouro', 'rf'].includes(a.tipo)).map((a) => a.ticker))].sort();
+  return `
+    <section class="bloco">
+      <div class="bloco-cab"><h2>Simular aportes</h2><small>e se eu tivesse investido todo mês desde…</small></div>
+      <div class="campos">
+        <label class="campo"><span>Desde</span><input type="month" id="sim-inicio" value="${esc(SIM.inicio)}" min="2015-01" max="${mesDe(hojeISO())}"><span class="sub">aporte no 1º dia útil de cada mês, até hoje</span></label>
+        <label class="campo"><span>Aporte mensal</span><input id="sim-aporte" class="num" inputmode="decimal" value="${Number(SIM.aporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"><span class="sub"></span></label>
+        <div class="campo"><span>Proventos</span>
+          <div class="seg" role="group" aria-label="Proventos">${[[true, 'Reinvestir'], [false, 'Guardar']].map(([k, n]) => `<button type="button" data-reinv="${k}" aria-pressed="${SIM.reinvestir === k}">${n}</button>`).join('')}</div>
+          <span class="sub">${SIM.reinvestir ? 'entram no aporte do mês seguinte' : 'ficam com você, fora da carteira'}</span></div>
+      </div>
+    </section>
+    <datalist id="sim-tickers">${tickers.map((t) => `<option value="${esc(t)}">`).join('')}</datalist>
+    <div class="sim-carteiras">
+      ${htmlCarteiraSim(SIM.carteiras[0], 0)}
+      ${SIM.comparar ? htmlCarteiraSim(SIM.carteiras[1], 1) : ''}
+    </div>
+    <div class="sim-acoes">
+      <button type="button" class="btn" id="sim-comparar">${SIM.comparar ? 'Simular só a Carteira A' : 'Comparar com outra carteira'}</button>
+      <button type="button" class="btn prim" id="sim-rodar" ${simulando ? 'disabled' : ''}>${simulando ? 'Buscando o histórico…' : 'Simular'}</button>
+    </div>
+    ${!N.nuvem.servidor && N.nuvem.estado !== 'verificando' ? '<p class="aviso">O simulador busca o histórico pelo Worker da Cloudflare: abra o app pelo endereço publicado.</p>' : ''}
+    <div id="sim-saida">${htmlResultadoSim()}</div>`;
+}
+
+function htmlGraficoSim(largura) {
+  const { res, cfg } = SIM_RES;
+  const W = Math.max(300, Math.round(largura)), H = Math.round(Math.min(300, Math.max(210, W * 0.45)));
+  const m = { l: 8, r: 8, t: 14, b: 26 };
+  const serie = res[0].serie;
+  const n = serie.length;
+  const maxV = Math.max(...res.flatMap((r) => r.serie.map((p) => p.total)), ...serie.map((p) => p.aportado));
+  const passo = niceStep(maxV / 4);
+  const topo = Math.ceil(maxV / passo) * passo || 1;
+  const x = (i) => m.l + (n <= 1 ? 0 : (i / (n - 1)) * (W - m.l - m.r));
+  const y = (v) => m.t + (1 - v / topo) * (H - m.t - m.b);
+  const linha = (pts) => pts.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  const grade = [];
+  for (let v = passo; v <= topo + 1e-6; v += passo) grade.push(`<line class="grade" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l + 2}" y="${y(v) - 4}">${compacto(v)}</text>`);
+  const anos = [];
+  serie.forEach((p, i) => { if (i === 0 || p.data.slice(0, 4) !== serie[i - 1].data.slice(0, 4)) anos.push(`<text class="x" x="${x(i)}" y="${H - 8}" text-anchor="${i === 0 ? 'start' : 'middle'}">${i === 0 ? mesCurto(p.data.slice(0, 7)) : p.data.slice(0, 4)}</text>`); });
+  return `<svg class="grafico sim-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Evolução do valor de cada carteira e do total aportado">
+    ${grade.join('')}<line class="base" x1="${m.l}" x2="${W - m.r}" y1="${y(0)}" y2="${y(0)}"/>${anos.join('')}
+    <path class="sim-l-inv" d="${linha(serie.map((p) => p.aportado))}"/>
+    ${res.map((r, i) => `<path class="sim-l sim-l-${CORES_SIM[i]}" d="${linha(r.serie.map((p) => p.total))}"/>`).join('')}
+    ${res.map((r, i) => `<circle class="sim-pt sim-pt-${CORES_SIM[i]}" r="4.5" cx="${x(n - 1)}" cy="${y(r.total)}"/>`).join('')}
+    <g class="sim-mira" hidden><line class="sim-mira-l" y1="${m.t}" y2="${H - m.b}"/>${res.map((r, i) => `<circle class="sim-pt sim-pt-${CORES_SIM[i]}" r="4.5"/>`).join('')}<circle class="sim-pt sim-pt-inv" r="4"/></g>
+    <rect class="sim-alvo" x="0" y="0" width="${W}" height="${H}" fill="transparent"/>
+  </svg><div class="sim-dica" hidden></div>`;
+}
+
+function desenharGraficoSim() {
+  const box = $('#sim-graf');
+  if (!box || !SIM_RES) return;
+  box.innerHTML = htmlGraficoSim(box.clientWidth || 600);
+  const svg = $('svg', box), dica = $('.sim-dica', box), mira = $('.sim-mira', box);
+  const { res, cfg } = SIM_RES;
+  const serie = res[0].serie, n = serie.length;
+  const W = svg.viewBox.baseVal.width, H = svg.viewBox.baseVal.height;
+  const passo = niceStep(Math.max(...res.flatMap((r) => r.serie.map((p) => p.total)), ...serie.map((p) => p.aportado)) / 4);
+  const topo = Math.ceil(Math.max(...res.flatMap((r) => r.serie.map((p) => p.total)), ...serie.map((p) => p.aportado)) / passo) * passo || 1;
+  const x = (i) => 8 + (n <= 1 ? 0 : (i / (n - 1)) * (W - 16));
+  const y = (v) => 14 + (1 - v / topo) * (H - 40);
+  const mostrar = (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.clientX - r.left) / r.width) * W;
+    const i = Math.max(0, Math.min(n - 1, Math.round(((px - 8) / (W - 16)) * (n - 1))));
+    mira.hidden = false;
+    const l = $('.sim-mira-l', mira); l.setAttribute('x1', x(i)); l.setAttribute('x2', x(i));
+    const pts = mira.querySelectorAll('circle');
+    res.forEach((rr, k) => { pts[k].setAttribute('cx', x(i)); pts[k].setAttribute('cy', y(rr.serie[i].total)); });
+    pts[res.length].setAttribute('cx', x(i)); pts[res.length].setAttribute('cy', y(serie[i].aportado));
+    dica.hidden = false;
+    dica.innerHTML = `<b>${dataBR(serie[i].data)}</b>${res.map((rr, k) => `<span><i class="sw sim-sw-${CORES_SIM[k]}"></i>${esc(cfg.carteiras[k].nome)} <b class="num">${R(rr.serie[i].total)}</b></span>`).join('')}<span><i class="sw sim-sw-inv"></i>Aportado <b class="num">${R(serie[i].aportado)}</b></span>`;
+    const esq = (x(i) / W) * r.width;
+    dica.style.left = `${Math.min(Math.max(0, esq - dica.offsetWidth / 2), r.width - dica.offsetWidth)}px`;
+  };
+  const esconder = () => { mira.hidden = true; dica.hidden = true; };
+  svg.addEventListener('pointermove', mostrar);
+  svg.addEventListener('pointerdown', mostrar);
+  svg.addEventListener('pointerleave', esconder);
+}
+
+async function rodarSimulacao() {
+  const cfg = JSON.parse(JSON.stringify(SIM));
+  cfg.carteiras = cfg.comparar ? cfg.carteiras : cfg.carteiras.slice(0, 1);
+  for (const c of cfg.carteiras) {
+    c.itens = c.itens.filter((it) => (Number(it.peso) || 0) > 0);
+    for (const it of c.itens) {
+      if (it.tipo === 'bolsa') {
+        it.ticker = String(it.ticker || '').trim().toUpperCase();
+        if (!/^[A-Z0-9]{4,12}$/.test(it.ticker)) { toast(`${c.nome}: confira o código do ativo.`); return; }
+      } else if (TIPOS_SIM[it.tipo].taxa) {
+        it.taxa = Number(it.taxa ?? TIPOS_SIM[it.tipo].taxa.padrao);
+        if (!Number.isFinite(it.taxa)) { toast(`${c.nome}: confira a taxa.`); return; }
+      }
+    }
+    if (!c.itens.length) { toast(`${c.nome}: coloque um percentual em pelo menos um investimento.`); return; }
+  }
+  if (!(cfg.aporte > 0)) { toast('Informe o valor do aporte mensal.'); return; }
+  if (!/^\d{4}-\d{2}$/.test(cfg.inicio) || cfg.inicio > mesDe(hojeISO())) { toast('Escolha o mês de início.'); return; }
+
+  simulando = true; render();
+  try {
+    const de = `${cfg.inicio}-01`;
+    const todos = cfg.carteiras.flatMap((c) => c.itens);
+    const tickers = [...new Set(todos.filter((it) => it.tipo === 'bolsa').map((it) => it.ticker))];
+    const series = seriesNecessarias(todos);
+    const [precos, indices] = await Promise.all([
+      Promise.all(tickers.map((t) => apiSim(`sim/precos?t=${t}&de=${de}`).catch((e) => { throw new Error(`${t}: ${e.message}`); }))),
+      Promise.all(series.map((s) => apiSim(`sim/indice?s=${s}&de=${de}`).catch((e) => { throw new Error(`taxa ${s.toUpperCase()}: ${e.message}`); }))),
+    ]);
+    const dados = { precos: Object.fromEntries(precos.map((p) => [p.ticker, p])), indices: Object.fromEntries(indices.map((x) => [x.serie, x.dados])) };
+    SIM_RES = { cfg, res: cfg.carteiras.map((c) => simular({ inicio: cfg.inicio, aporte: cfg.aporte, reinvestir: cfg.reinvestir, itens: c.itens }, dados)) };
+  } catch (e) {
+    toast(`Não deu para simular: ${e.message}`);
+  } finally {
+    simulando = false;
+    if (location.hash === '#simular') { render(); $('#sim-saida')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  }
+}
+
+function ligarSimular() {
+  const raiz = $('#conteudo');
+  const redesenharCarteira = (ci) => {
+    const velho = raiz.querySelector(`[data-carteira="${ci}"]`);
+    if (!velho) return;
+    velho.outerHTML = htmlCarteiraSim(SIM.carteiras[ci], ci);
+  };
+  const atualizaSoma = (ci) => {
+    const el = raiz.querySelector(`[data-soma="${ci}"]`);
+    if (!el) return;
+    const soma = pesoSoma(SIM.carteiras[ci]);
+    const ok = Math.abs(soma - 100) < 0.01;
+    el.textContent = ok ? 'soma 100%' : `soma ${fmtPct0(soma)} — o app divide na proporção`;
+    el.classList.toggle('var-baixa', !ok);
+  };
+  raiz.addEventListener('input', (e) => {
+    const t = e.target;
+    if (t.id === 'sim-aporte') { SIM.aporte = num(t.value) || 0; salvarSim(); return; }
+    if (t.id === 'sim-inicio') { if (t.value) { SIM.inicio = t.value; salvarSim(); } return; }
+    const row = t.closest('.sim-item');
+    if (!row || t.dataset.campo === 'tipo') return;
+    const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
+    if (t.dataset.campo === 'ticker') it.ticker = t.value.toUpperCase();
+    if (t.dataset.campo === 'taxa') it.taxa = num(t.value);
+    if (t.dataset.campo === 'peso') { it.peso = num(t.value) || 0; atualizaSoma(row.dataset.c); }
+    salvarSim();
+  });
+  raiz.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.dataset.campo !== 'tipo') return;
+    const row = t.closest('.sim-item');
+    const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
+    it.tipo = t.value;
+    if (TIPOS_SIM[it.tipo].taxa) it.taxa = TIPOS_SIM[it.tipo].taxa.padrao; else delete it.taxa;
+    if (it.tipo !== 'bolsa') delete it.ticker;
+    salvarSim(); redesenharCarteira(row.dataset.c);
+  });
+  raiz.addEventListener('click', (e) => {
+    const t = e.target.closest('button');
+    if (!t) return;
+    if (t.dataset.reinv) { SIM.reinvestir = t.dataset.reinv === 'true'; salvarSim(); render(); return; }
+    if (t.dataset.add != null) {
+      const c = SIM.carteiras[t.dataset.add];
+      c.itens.push({ tipo: 'bolsa', ticker: '', peso: Math.max(0, 100 - pesoSoma(c)) });
+      salvarSim(); redesenharCarteira(t.dataset.add);
+      raiz.querySelector(`[data-carteira="${t.dataset.add}"] .sim-item:last-child .sim-ticker`)?.focus();
+      return;
+    }
+    if (t.hasAttribute('data-tirar')) {
+      const row = t.closest('.sim-item');
+      SIM.carteiras[row.dataset.c].itens.splice(Number(row.dataset.i), 1);
+      salvarSim(); redesenharCarteira(row.dataset.c);
+      return;
+    }
+    if (t.id === 'sim-comparar') { SIM.comparar = !SIM.comparar; salvarSim(); render(); return; }
+    if (t.id === 'sim-rodar') rodarSimulacao();
+  });
+  desenharGraficoSim();
+}
+window.addEventListener('resize', () => { if (location.hash === '#simular') { clearTimeout(ligarSimular.t); ligarSimular.t = setTimeout(desenharGraficoSim, 150); } });
+
 // ---------- aba Ajustes ----------
 function renderAjustes() {
   const pctTxt = (f) => (Number(f || 0) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
@@ -2028,6 +2314,7 @@ const ABAS = {
   comprar: [renderComprar, ligarComprar],
   carteira: [renderCarteira, ligarHistorico],
   proventos: [renderProventos, ligarProventos],
+  simular: [renderSimular, ligarSimular],
   ajustes: [renderAjustes, ligarAjustes],
 };
 

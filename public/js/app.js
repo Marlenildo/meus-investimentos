@@ -11,7 +11,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.6.0';
+export const VERSAO = '1.6.1';
 const VERSAO_DATA = '2026-10-19';
 
 let S = carregar();
@@ -546,7 +546,7 @@ function abrirRegistrar() {
       <p class="dica">Confira as quantidades e o preço que saiu na nota do ${esc(b.nome)}. Se pagou um preço diferente, corrija aqui.</p>
       <div class="campos">
         <label class="campo"><span>Data da compra</span><input type="date" id="reg-data" value="${hojeISO()}" required></label>
-        <label class="campo"><span>Banco</span><select id="reg-banco">${S.bancos.map((bk) => `<option value="${bk.id}" ${bk.id === b.id ? 'selected' : ''}>${esc(bk.nome)}</option>`).join('')}</select></label>
+        <label class="campo"><span>Banco</span><select id="reg-banco">${S.bancos.map((bk) => `<option value="${bk.id}" data-icone="${esc(logoBanco(bk.id, bk.nome))}" ${bk.id === b.id ? 'selected' : ''}>${esc(bk.nome)}</option>`).join('')}</select></label>
       </div>
       <div class="linhas">
         <div class="linha"><small>Ativo</small><small style="text-align:right">Qtd</small><small style="text-align:right">Preço pago</small></div>
@@ -1008,7 +1008,7 @@ function htmlGrafico(largura) {
         <div class="graf-controles">
           ${bancosUsados().length > 1 ? `<select id="graf-banco" class="peq" aria-label="Banco">
             <option value="">Todos os bancos</option>
-            ${bancosUsados().map((b) => `<option value="${esc(b.id)}" ${b.id === G.banco ? 'selected' : ''}>${esc(b.nome)}</option>`).join('')}
+            ${bancosUsados().map((b) => `<option value="${esc(b.id)}" data-icone="${esc(logoBanco(b.id, b.nome))}" ${b.id === G.banco ? 'selected' : ''}>${esc(b.nome)}</option>`).join('')}
           </select>` : ''}
           <select id="graf-ativo" class="peq" aria-label="Ativo">
             <option value="">Todos os ativos</option>
@@ -1149,7 +1149,7 @@ function abrirEditarCompra(id, nova) {
         <label class="campo"><span>Operação</span><select id="ed-lado">${Object.entries(ROTULO_LADO).map(([k, v]) => `<option value="${k}" ${k === lado0 ? 'selected' : ''}>${v}</option>`).join('')}</select><small class="sub"></small></label>
         <label class="campo"><span>Ativo</span><select id="ed-ticker" ${existente ? 'disabled' : ''}>${opcoesTicker(lado0).map((t) => `<option ${t === c.ticker ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select><small class="sub" id="ed-pos"></small></label>
         <label class="campo"><span id="ed-rot-data">Data</span><input type="date" id="ed-data" value="${esc(c.data)}" max="${hojeISO()}" required><small class="sub"></small></label>
-        <label class="campo"><span>Banco</span><select id="ed-banco">${S.bancos.map((bk) => `<option value="${bk.id}" ${bk.id === bancoAtual ? 'selected' : ''}>${esc(bk.nome)}</option>`).join('')}</select><small class="sub"></small></label>
+        <label class="campo"><span>Banco</span><select id="ed-banco">${S.bancos.map((bk) => `<option value="${bk.id}" data-icone="${esc(logoBanco(bk.id, bk.nome))}" ${bk.id === bancoAtual ? 'selected' : ''}>${esc(bk.nome)}</option>`).join('')}</select><small class="sub"></small></label>
         <label class="campo"><span id="ed-rot-qtd">Cotas</span><input class="num" id="ed-qtd" inputmode="decimal" value="${c.qtd === '' ? '' : fmtQtd(c.qtd)}" placeholder="0" required><small class="sub"></small></label>
         <label class="campo" id="ed-c-preco"><span id="ed-rot-preco">Preço por cota</span><input class="num" id="ed-preco" inputmode="decimal" value="${c.preco === '' ? '' : fmtValor(c.preco)}" placeholder="0,00"><small class="sub" id="ed-dia"></small></label>
         <label class="campo" id="ed-c-custo"><span>Taxas</span><input class="num" id="ed-custo" inputmode="decimal" value="${fmtValor(c.custo || 0)}"><small class="sub"><button type="button" id="ed-recalc">calcular pelo banco</button></small></label>
@@ -1701,7 +1701,7 @@ function renderAjustes() {
           <span class="sub"></span>
         </div>
         <label class="campo"><span>Banco onde você compra</span>
-          <select id="aj-banco">${S.bancos.map((b) => `<option value="${esc(b.id)}" ${b.id === banco().id ? 'selected' : ''}>${esc(b.nome)}</option>`).join('')}</select>
+          <select id="aj-banco">${S.bancos.map((b) => `<option value="${esc(b.id)}" data-icone="${esc(logoBanco(b.id, b.nome))}" ${b.id === banco().id ? 'selected' : ''}>${esc(b.nome)}</option>`).join('')}</select>
           <span class="sub">usado para calcular as taxas</span>
         </label>
         <label class="campo"><span>Aporte mensal padrão</span>

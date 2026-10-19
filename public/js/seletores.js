@@ -18,6 +18,9 @@ const hoje = () => iso(new Date());
 const dataBR = (s) => (s ? s.split('-').reverse().join('/') : '');
 const celular = () => matchMedia('(max-width: 600px)').matches;
 
+/** Ícone de uma opção (logo do banco…): HTML montado pelo próprio app em data-icone. */
+const icone = (o) => o?.dataset?.icone || '';
+
 /** Faz o `.value = x` do código continuar atualizando o botão visível. */
 function vigiarValor(el, aoMudar) {
   const proto = Object.getPrototypeOf(el);
@@ -114,7 +117,7 @@ function melhorarSelect(sel) {
 
   const pintar = () => {
     const op = sel.options[sel.selectedIndex];
-    btn.innerHTML = `<span class="sel-txt">${esc(op ? op.text : '')}</span>${SETA}`;
+    btn.innerHTML = `<span class="sel-txt">${icone(op)}${esc(op ? op.text : '')}</span>${SETA}`;
     btn.disabled = sel.disabled;
   };
   vigiarValor(sel, pintar);
@@ -138,7 +141,7 @@ function melhorarSelect(sel) {
     if (rotulo) lista.setAttribute('aria-label', rotulo);
     const ops = [...sel.options];
     lista.innerHTML = (rotulo && celular() ? `<div class="sel-titulo">${esc(rotulo)}</div>` : '')
-      + ops.map((o, i) => `<button type="button" role="option" class="sel-op" data-i="${i}" aria-selected="${i === sel.selectedIndex}" ${o.disabled ? 'disabled' : ''}><span>${esc(o.text)}</span>${i === sel.selectedIndex ? CHECK : ''}</button>`).join('');
+      + ops.map((o, i) => `<button type="button" role="option" class="sel-op" data-i="${i}" aria-selected="${i === sel.selectedIndex}" ${o.disabled ? 'disabled' : ''}><span>${icone(o)}${esc(o.text)}</span>${i === sel.selectedIndex ? CHECK : ''}</button>`).join('');
     const { painel, fechar } = abrirPainel(btn, lista, { classe: 'lista' });
     const botoes = [...painel.querySelectorAll('.sel-op')];
     const atual = botoes[sel.selectedIndex] || botoes[0];

@@ -740,7 +740,6 @@ html, body { overflow-x: clip; }
 .s-tes0 { fill: var(--s-tes); background: var(--s-tes); }
 .s-tes1 { fill: #e6bd63; background: #e6bd63; }
 .s-tes2 { fill: #8f6212; background: #8f6212; }
-.filtros .sw.s-tesouro { background: linear-gradient(90deg, var(--s-tes) 50%, #e6bd63 50%); }
 .grafico .seg-neg { fill: var(--baixa); paint-order: stroke; stroke: var(--folha); stroke-width: 3px; }
 .grafico .seg-inv { fill: #fff; paint-order: stroke; stroke: rgba(0, 0, 0, 0.18); stroke-width: 2px; }
 .grafico .seg-rot { letter-spacing: -0.01em; }
@@ -840,3 +839,5 @@ html, body { overflow-x: clip; }
 .logo-banco { position: relative; display: inline-grid; place-items: center; width: 16px; height: 16px; flex: none; border-radius: 4px; overflow: hidden; background: var(--folha-2); color: var(--tinta-3); font: 700 0.5rem/1 var(--f-display); letter-spacing: -0.02em; box-shadow: inset 0 0 0 1px var(--linha); }
 .logo-banco img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; background: #fff; }
 .logo-banco img.ok { opacity: 1; }
+.sel-btn .logo-banco, .sel-op .logo-banco { margin-right: 7px; width: 18px; height: 18px; vertical-align: -4px; }
+.sel-op > span { display: inline-flex; align-items: center; }

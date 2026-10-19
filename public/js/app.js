@@ -1,15 +1,19 @@
 import {
   TIPOS, TIPOS_PROVENTO, round2, normalizaQtd, passoDe, resumoPlano, linhaPlano, qtdMaxima, avisoMinimo,
   mesAnterior, mesDe, hojeISO, somaProventosMes, proventosPorTipo, carteira, resumoPorPeriodo, ladoDe, processarOperacoes, classesPorTicker, liquidoSeVender, dataLiquidacao, emLiquidacao, estimarCompra, fatoresDoMes, precoTesouroEm,
-  PROV_DE_FATO, ehProvDeFato, custoOrdem,
+  PROV_DE_FATO, ehProvDeFato, custoOrdem, TAXA_B3_PADRAO,
 } from './calc.js';
-import { lerMovimentacao, novidades } from './b3.js';
+import { lerMovimentacao, novidades, bancoDaInstituicao } from './b3.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
 import * as N from './nuvem.js';
 import './seletores.js';
 
 // ---------- estado ----------
+// versão do app (mostrada no rodapé): suba a cada mudança publicada
+export const VERSAO = '1.5.0';
+const VERSAO_DATA = '2026-10-19';
+
 let S = carregar();
 const statusCotacao = {}; // ativoId -> {erro?, variacao?}
 let atualizando = false;
@@ -123,8 +127,8 @@ function renderBoleta() {
 }
 
 /** O que ainda está liquidando (bolsa, D+2): valor a preço de hoje e o dia em que entra na custódia. */
-function liquidando() {
-  const xs = emLiquidacao(S.compras, hojeISO());
+function liquidando(compras = S.compras) {
+  const xs = emLiquidacao(compras, hojeISO());
   let valor = 0, ate = '';
   const porTicker = new Map();
   for (const c of xs) {
@@ -600,15 +604,30 @@ const compacto = (v) => v >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maxi
 
 /** Todos os meses (ou anos) do primeiro registro até hoje, inclusive os vazios. Dias: só os que tiveram movimento. */
 /** Compras e proventos do ativo escolhido no Histórico (todos quando nenhum). */
+/** Banco de uma operação ou provento (os antigos, sem banco, contam no banco padrão). */
+const bancoDe = (x) => x.banco || S.ajustes.banco;
+/** Bancos que aparecem nas operações e proventos, na ordem da lista de bancos. */
+function bancosUsados() {
+  const ids = new Set([...S.compras, ...S.proventos].map(bancoDe));
+  return [...S.bancos.filter((b) => ids.has(b.id)), ...[...ids].filter((id) => !S.bancos.some((b) => b.id === id)).map((id) => ({ id, nome: id }))];
+}
+/** Compras e proventos do banco escolhido no Histórico (todos quando nenhum). */
+function dadosDoBanco() {
+  if (G.banco && !bancosUsados().some((b) => b.id === G.banco)) G.banco = '';
+  if (!G.banco) return { compras: S.compras, proventos: S.proventos };
+  return { compras: S.compras.filter((c) => bancoDe(c) === G.banco), proventos: S.proventos.filter((p) => bancoDe(p) === G.banco) };
+}
 function dadosDoFiltro() {
-  if (G.ativo && !S.compras.some((c) => c.ticker === G.ativo) && !S.proventos.some((p) => p.ticker === G.ativo)) G.ativo = '';
+  const d = dadosDoBanco();
+  if (G.ativo && !d.compras.some((c) => c.ticker === G.ativo) && !d.proventos.some((p) => p.ticker === G.ativo)) G.ativo = '';
   const t = G.ativo;
-  if (!t) return { compras: S.compras, proventos: S.proventos };
-  return { compras: S.compras.filter((c) => c.ticker === t), proventos: S.proventos.filter((p) => p.ticker === t) };
+  if (!t) return d;
+  return { compras: d.compras.filter((c) => c.ticker === t), proventos: d.proventos.filter((p) => p.ticker === t) };
 }
 /** Ativos que aparecem no filtro: os que você tem ou já teve, e os que pagaram proventos. */
 function ativosDoFiltro() {
-  return [...new Set([...S.compras.map((c) => c.ticker), ...S.proventos.map((p) => p.ticker)])]
+  const d = dadosDoBanco();
+  return [...new Set([...d.compras.map((c) => c.ticker), ...d.proventos.map((p) => p.ticker)])]
     .filter((t) => t && t !== 'Vários')
     .sort((a, b) => a.localeCompare(b));
 }
@@ -964,10 +983,14 @@ function htmlGrafico(largura) {
     <section class="bloco grafico-bloco" id="graf-hist">
       <div class="graf-topo">
         <div>
-          <h2>${acum ? 'Total acumulado' : 'Quanto investi'}${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
+          <h2>${acum ? 'Total acumulado' : 'Quanto investi'}${G.banco ? ` <span class="graf-ativo-nome">· ${esc(bancosUsados().find((b) => b.id === G.banco)?.nome || G.banco)}</span>` : ''}${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
           <small class="sub-cab">${subCab}</small>
         </div>
         <div class="graf-controles">
+          ${bancosUsados().length > 1 ? `<select id="graf-banco" class="peq" aria-label="Banco">
+            <option value="">Todos os bancos</option>
+            ${bancosUsados().map((b) => `<option value="${esc(b.id)}" ${b.id === G.banco ? 'selected' : ''}>${esc(b.nome)}</option>`).join('')}
+          </select>` : ''}
           <select id="graf-ativo" class="peq" aria-label="Ativo">
             <option value="">Todos os ativos</option>
             ${ativosDoFiltro().map((t) => `<option ${t === G.ativo ? 'selected' : ''}>${esc(t)}</option>`).join('')}
@@ -1012,8 +1035,9 @@ function ligarGrafico() {
   // mede a largura real e redesenha para caber sem rolagem quando possível
   redesenharGrafico({ fim: true });
   $('#conteudo').addEventListener('change', (e) => {
-    if (e.target.id !== 'graf-ativo') return;
-    G.ativo = e.target.value;
+    if (e.target.id !== 'graf-ativo' && e.target.id !== 'graf-banco') return;
+    if (e.target.id === 'graf-banco') G.banco = e.target.value;
+    else G.ativo = e.target.value;
     G.sel = null;
     salvarG();
     const y = scrollY;
@@ -1258,7 +1282,7 @@ function htmlPorTipo(c) {
   const sw = (t) => `s-${NOMES_TIPO[t] ? t : 'outros'}`;
   return `
     <section class="bloco carteira-tipos">
-      <div class="bloco-cab"><h2>Por tipo</h2><small>quanto da carteira está em cada tipo, pelo valor de hoje</small></div>
+      <div class="bloco-cab"><h2>Por tipo${G.banco ? ` <span class="graf-ativo-nome">· ${esc(banco(G.banco).nome)}</span>` : ''}</h2><small>quanto da carteira está em cada tipo, pelo valor de hoje</small></div>
       <div class="pt-barra" role="img" aria-label="${tipos.map((t) => `${NOMES_TIPO[t] || t} ${pc(g.get(t).valor)}`).join(', ')}">${tipos.map((t) => `<i class="${sw(t)}" style="width:${(g.get(t).valor / total) * 100}%"></i>`).join('')}</div>
       <div class="pt-lista">${tipos.map((t) => {
         const x = g.get(t);
@@ -1276,7 +1300,8 @@ function renderCarteira() {
   if (!S.compras.length) {
     return `<section class="bloco"><div class="vazio"><h2>Sua carteira aparece aqui</h2><p>Depois de comprar no banco, toque em <b>Comprei — registrar</b> na tela inicial. Aqui você vê cotas, preço médio, quanto investiu e o retorno.</p><a class="btn prim" href="#comprar">Ir para Comprar</a></div></section>`;
   }
-  const c = carteira(S.compras, S.ativos, S.proventos);
+  const db = dadosDoBanco(); // com um banco escolhido, os números de cima são só dele
+  const c = carteira(db.compras, S.ativos, db.proventos);
   VENDAS = processarOperacoes(S.compras);
   const cls = (v) => (v == null ? '' : v >= 0 ? 'var-alta' : 'var-baixa');
   const porMes = groupBy(dadosDoFiltro().compras.slice().sort((a, b) => b.data.localeCompare(a.data)), (x) => mesDe(x.data));
@@ -1284,14 +1309,14 @@ function renderCarteira() {
     <div class="kpis">
       <div class="kpi"><small>Investido</small><span class="num">${R(c.investido)}</span></div>
       <div class="kpi"><small>Valor hoje</small><span class="num">${R(c.valorAtual)}</span>${(() => {
-        const lq = liquidando();
+        const lq = liquidando(db.compras);
         return lq.xs.length ? `<small class="kpi-extra">No banco agora: <b>${R(c.valorAtual - lq.valor)}</b> · ${R(lq.valor)} entra em ${dataBR(lq.ate).slice(0, 5)}</small>` : '';
       })()}</div>
       <div class="kpi"><small>Resultado</small><span class="num ${cls(c.resultado)}">${R(c.resultado)} <small class="${cls(c.resultado)}">${pct(c.investido ? c.resultado / c.investido : null)}</small></span>${c.realizado ? `<small class="kpi-extra">Vendas: <b class="${cls(c.realizado)}">${c.realizado > 0 ? '+' : ''}${R(c.realizado)}</b></small>` : ''}</div>
       <div class="kpi"><small>Proventos recebidos</small><span class="num">${R(c.proventos)}</span></div>
     </div>
     ${(() => {
-      const lq = liquidoSeVender(S.compras, S.ativos, hojeISO());
+      const lq = liquidoSeVender(db.compras, S.ativos, hojeISO());
       if (!lq.total.bruto) return '';
       const desc = lq.total.ir + lq.total.iof + lq.total.taxas;
       const partes = [
@@ -1313,7 +1338,7 @@ function renderCarteira() {
 
 
     <section class="bloco">
-      <div class="bloco-cab"><h2>Operações${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
+      <div class="bloco-cab"><h2>Operações${G.banco ? ` <span class="graf-ativo-nome">· ${esc(banco(G.banco).nome)}</span>` : ''}${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
         <div class="acoes"><button type="button" class="btn peq" data-nova-op="V">Registrar venda</button><button type="button" class="btn peq" data-nova-op="C">Compra antiga</button></div></div>
       ${[...porMes.entries()].map(([mes, xs], i) => `
         <details class="mes-grupo" ${i === 0 ? 'open' : ''}>
@@ -1838,6 +1863,19 @@ async function lerExtratoB3(f) {
 
 function abrirResumoB3(res) {
   const { proventos, operacoes, lido } = res;
+  // cada linha vai para o banco da instituição que aparece no extrato (Nubank, Toro, XP…); banco desconhecido é criado
+  const novosBancos = new Map();
+  const qualBanco = (inst) => {
+    const r = bancoDaInstituicao(inst, [...S.bancos, ...novosBancos.values()]);
+    if (!r) return banco().id;
+    if (r.novo && !novosBancos.has(r.id)) novosBancos.set(r.id, { id: r.id, nome: r.nome, corretagem: 0, taxaB3: TAXA_B3_PADRAO, taxaTesouro: 0 });
+    return r.id;
+  };
+  for (const x of [...operacoes, ...proventos]) x.banco = qualBanco(x.inst);
+  const nomeBanco = (id) => (S.bancos.find((b) => b.id === id) || novosBancos.get(id))?.nome || id;
+  const variosBancos = new Set([...lido.operacoes, ...lido.proventos].map((x) => qualBanco(x.inst))).size > 1;
+  const tagBanco = (id) => (variosBancos ? ` · ${esc(nomeBanco(id))}` : '');
+  const contagem = (xs) => [...xs.reduce((m, x) => m.set(x.banco, (m.get(x.banco) || 0) + 1), new Map())].map(([id, n]) => `${esc(nomeBanco(id))} ${n}`).join(' · ');
   const jaTinha = lido.proventos.length - proventos.length + lido.operacoes.length - operacoes.length;
   const somaP = round2(proventos.reduce((s, p) => s + p.valor, 0));
   const porTipo = proventosPorTipo(proventos);
@@ -1847,16 +1885,17 @@ function abrirResumoB3(res) {
     <form method="dialog" id="form-reg">
       <h2>Extrato da B3</h2>
       <p class="dica">${res.de ? `De ${dataBR(res.de)} a ${dataBR(res.ate)}.` : ''} ${jaTinha ? `${jaTinha} ${jaTinha === 1 ? 'item já estava' : 'itens já estavam'} no app e ${jaTinha === 1 ? 'foi pulado' : 'foram pulados'}.` : ''}</p>
+      ${variosBancos && (proventos.length || operacoes.length) ? `<p class="dica">Cada item vai para o banco que aparece no extrato: ${contagem([...operacoes, ...proventos])}.${novosBancos.size ? ` ${[...novosBancos.values()].map((b) => esc(b.nome)).join(', ')} ${novosBancos.size === 1 ? 'entra' : 'entram'} na lista de bancos.` : ''}</p>` : ''}
       ${!proventos.length && !operacoes.length ? '<p class="aviso">Nada novo: tudo deste extrato já está no app.</p>' : ''}
       ${proventos.length ? `<div class="b3-bloco">
         <div class="cc-linha"><b>${proventos.length} ${proventos.length === 1 ? 'provento novo' : 'proventos novos'}</b><b class="num">${R(somaP)}</b></div>
         <small class="dica">${TIPOS_PROV_ORDEM.filter((k) => porTipo[k] > 0).map((k) => `${esc(NOME_CURTO_PROV[k] || TIPOS_PROVENTO[k])} ${R(porTipo[k])}`).join(' · ')}</small>
-        <div class="b3-lista">${proventos.map((p) => `<div class="cc-linha"><span>${dataBR(p.data).slice(0, 5)} <b>${esc(p.ticker)}</b> <small>${esc(NOME_CURTO_PROV[p.tipo] || TIPOS_PROVENTO[p.tipo])}</small></span><span class="num">${R(p.valor)}</span></div>`).join('')}</div>
+        <div class="b3-lista">${proventos.map((p) => `<div class="cc-linha"><span>${dataBR(p.data).slice(0, 5)}${p.data.slice(0, 4) !== String(new Date().getFullYear()) ? `/${p.data.slice(2, 4)}` : ''} <b>${esc(p.ticker)}</b> <small>${esc(NOME_CURTO_PROV[p.tipo] || TIPOS_PROVENTO[p.tipo])}${tagBanco(p.banco)}</small></span><span class="num">${R(p.valor)}</span></div>`).join('')}</div>
       </div>` : ''}
       ${operacoes.length ? `<div class="b3-bloco">
         <div class="cc-linha"><b>${operacoes.length} ${operacoes.length === 1 ? 'operação que não está' : 'operações que não estão'} no app</b></div>
         <small class="dica">Compras e vendas liquidadas na B3 sem registro aqui. A data é a do pregão (dois dias úteis antes da liquidação) e a taxa é estimada pelo seu banco; no Tesouro, data e preço são os exatos da B3, sem taxa. Desmarque o que não quiser.</small>
-        <div class="b3-lista">${operacoes.map((o, i) => `<label class="cc-linha b3-op"><span><input type="checkbox" data-b3-op="${i}" checked> ${dataBR(o.data).slice(0, 5)} <b>${esc(o.ticker)}</b> <small>${o.lado === 'V' ? 'venda' : o.lado === 'B' ? 'bonificação' : 'compra'} · ${fmtQtd(o.qtd)}${o.lado === 'B' ? ' cotas' : ` × ${R(o.preco)}`}${o.original !== o.ticker ? ` · era ${esc(o.original)}` : ''}${o.fator !== 1 ? ' · já com o desdobramento' : ''}</small></span><span class="num">${o.lado === 'B' ? '' : R(o.qtd * o.preco)}</span></label>`).join('')}</div>
+        <div class="b3-lista">${operacoes.map((o, i) => `<label class="cc-linha b3-op"><span><input type="checkbox" data-b3-op="${i}" checked> ${dataBR(o.data).slice(0, 5)}${o.data.slice(0, 4) !== String(new Date().getFullYear()) ? `/${o.data.slice(2, 4)}` : ''} <b>${esc(o.ticker)}</b> <small>${o.lado === 'V' ? 'venda' : o.lado === 'B' ? 'bonificação' : 'compra'} · ${fmtQtd(o.qtd)}${o.lado === 'B' ? ' cotas' : ` × ${R(o.preco)}`}${o.original !== o.ticker ? ` · era ${esc(o.original)}` : ''}${o.fator !== 1 ? ' · já com o desdobramento' : ''}${tagBanco(o.banco)}</small></span><span class="num">${o.lado === 'B' ? '' : R(o.qtd * o.preco)}</span></label>`).join('')}</div>
       </div>` : ''}
       ${res.avisos.length ? `<p class="aviso">Confira à mão, o app não ajusta sozinho: ${res.avisos.map((a) => `${esc(a.nome)} de ${esc(a.ticker)} em ${dataBR(a.data)}`).join('; ')}.</p>` : ''}
       ${ignorados.length ? `<p class="dica">Sem efeito no app: ${ignorados.map(([n, q]) => `${esc(n)}${q > 1 ? ` (${q})` : ''}`).join(', ')}.</p>` : ''}
@@ -1866,8 +1905,15 @@ function abrirResumoB3(res) {
   dlg.onclose = () => {
     if (dlg.returnValue !== 'ok') return;
     const marcadas = [...dlg.querySelectorAll('[data-b3-op]')].filter((c) => c.checked).map((c) => operacoes[Number(c.dataset.b3Op)]);
-    const bk = banco();
-    const novas = marcadas.map((o) => ({ id: uid(), data: o.data, ticker: o.ticker, tipo: S.ativos.find((a) => a.ticker === o.ticker)?.tipo || o.tipo, qtd: o.qtd, preco: o.preco, custo: o.lado === 'B' || o.tipo === 'tesouro' ? 0 : custoOrdem({ tipo: o.tipo }, o.qtd, o.preco, bk), banco: bk.id, ...(o.lado !== 'C' ? { lado: o.lado } : {}) }));
+    const usados = new Set([...marcadas, ...proventos].map((x) => x.banco));
+    const criar = [...novosBancos.values()].filter((b) => usados.has(b.id));
+    if (criar.length) { S.bancos.push(...criar); persist('bancos'); }
+    const novas = marcadas.map((o) => {
+      const { inst, ...op } = o;
+      const bk = banco(op.banco);
+      return { id: uid(), data: op.data, ticker: op.ticker, tipo: S.ativos.find((a) => a.ticker === op.ticker)?.tipo || op.tipo, qtd: op.qtd, preco: op.preco, custo: op.lado === 'B' || op.tipo === 'tesouro' ? 0 : custoOrdem({ tipo: op.tipo }, op.qtd, op.preco, bk), banco: bk.id, ...(op.lado !== 'C' ? { lado: op.lado } : {}) };
+    });
+    proventos.forEach((p) => delete p.inst);
     if (novas.length) { S.compras.push(...novas); N.adicionarCompras(novas); }
     if (proventos.length) { S.proventos.push(...proventos); N.adicionarProvento(proventos); }
     garantirAtivosDaCarteira();
@@ -2057,6 +2103,13 @@ function renderNuvem() {
   }
   const bloco = $('.conta-bloco');
   if (bloco && !bloco.contains(document.activeElement)) bloco.innerHTML = htmlConta();
+}
+
+// rodapé: ano corrente e versão
+{
+  const ano = $('#rod-ano'), ver = $('#rod-versao');
+  if (ano) ano.textContent = String(new Date().getFullYear());
+  if (ver) { ver.textContent = VERSAO; ver.parentElement.title = `Publicada em ${dataBR(VERSAO_DATA)}`; }
 }
 
 function render() {

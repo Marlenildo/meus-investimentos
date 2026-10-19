@@ -16,6 +16,9 @@ export const BANCOS_PADRAO = [
   { id: 'rico', nome: 'Rico', corretagem: 0 },
   { id: 'btg', nome: 'BTG Pactual', corretagem: 4.5 },
   { id: 'c6', nome: 'C6 Bank', corretagem: 0 },
+  { id: 'toro', nome: 'Toro', corretagem: 0 },
+  { id: 'orama', nome: 'Órama', corretagem: 0 },
+  { id: 'nikos', nome: 'Nikos', corretagem: 0 },
 ].map((b) => ({ taxaB3: TAXA_B3_PADRAO, taxaTesouro: 0, ...b }));
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 16) : Math.random().toString(36).slice(2, 12).padEnd(10, '0') + Date.now().toString(36).slice(-4));

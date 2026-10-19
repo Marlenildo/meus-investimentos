@@ -184,7 +184,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.6; cursor: po
 .abas a.ativa::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--gradiente); }
 
 /* ---------- blocos ---------- */
-.conteudo { padding-block: 20px 72px; display: grid; gap: 16px; }
+.conteudo { padding-block: 20px 28px; display: grid; gap: 16px; }
 .bloco { background: var(--folha); border: 1px solid var(--linha); border-radius: var(--raio-g); padding: 18px; display: grid; gap: 14px; min-width: 0; box-shadow: var(--sombra); }
 .bloco-cab { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .bloco-cab .sub-cab { display: block; font-size: 0.84rem; margin-top: 2px; }
@@ -819,9 +819,15 @@ html, body { overflow-x: clip; }
 .s-etf { fill: #4f74d9; background: #4f74d9; }
 .pt-barra { display: flex; height: 12px; border-radius: 6px; overflow: hidden; gap: 2px; margin: 4px 0 12px; background: var(--linha); }
 .pt-barra i { display: block; min-width: 3px; }
-.pt-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 16px; }
+.pt-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px 16px; }
 .pt-item { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 8px 0; border-top: 1px solid var(--linha); }
 .pt-nome { display: flex; align-items: center; gap: 6px; font-weight: 600; min-width: 0; }
 .pt-nome small { display: inline; color: var(--tinta-3); font-weight: 500; font-size: 0.76rem; }
 .pt-pct { font: 700 1.1rem var(--f-display); text-align: right; }
 .pt-valor { grid-column: 1 / -1; color: var(--tinta-2, var(--tinta-3)); font-size: 0.85rem; }
+
+/* rodapé: copyright e versão */
+.rodape { border-top: 1px solid var(--linha); margin-top: 8px; }
+.rodape-in { max-width: 920px; margin: 0 auto; padding: 16px var(--gutter-r) 32px var(--gutter-l); display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; color: var(--tinta-3); font-size: 0.8rem; }
+.rodape-ver b { font-weight: 600; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
+.rodape-in small { flex-basis: 100%; font-size: 0.74rem; line-height: 1.45; }

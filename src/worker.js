@@ -23,6 +23,8 @@ async function garantirSchema(db) {
   try { await db.prepare('ALTER TABLE compras ADD COLUMN importado INTEGER DEFAULT 0').run(); } catch { /* já existe */ }
   // lado: C = compra, V = venda, B = bonificação, A = ajuste de cotas (incorporação, grupamento)
   try { await db.prepare("ALTER TABLE compras ADD COLUMN lado TEXT DEFAULT 'C'").run(); } catch { /* já existe */ }
+  // banco onde o provento caiu (vem da instituição no extrato da B3)
+  try { await db.prepare('ALTER TABLE proventos ADD COLUMN banco TEXT').run(); } catch { /* já existe */ }
   schemaPronto = true;
 }
 
@@ -86,6 +88,7 @@ const compraLimpa = (c) => ({
 });
 const proventoLimpo = (p) => ({
   id: id(p.id), data: dataISO(p.data), ticker: texto(p.ticker, 60), tipo: texto(p.tipo, 20), valor: numero(p.valor),
+  banco: p.banco ? texto(p.banco, 40) : null,
 });
 
 // ---------- leitura do estado ----------
@@ -107,7 +110,7 @@ async function lerEstado(db) {
     plano: config.plano ?? null,
     ativos: ativos.results.map((a) => ({ id: a.id, ticker: a.ticker, tipo: a.tipo, nome: a.nome, preco: a.preco, precoEm: a.preco_em, fonte: a.fonte })),
     compras: compras.results.map(({ criado_em, importado, lado, ...c }) => ({ ...c, ...(importado ? { importado: true } : {}), ...(lado && lado !== 'C' ? { lado } : {}) })),
-    proventos: proventos.results.map(({ criado_em, ...p }) => p),
+    proventos: proventos.results.map(({ criado_em, banco, ...p }) => (banco ? { ...p, banco } : p)),
   };
 }
 
@@ -129,8 +132,8 @@ const stmtCompra = (db, c) => db.prepare(`INSERT INTO compras (id, data, ticker,
   ON CONFLICT(id) DO UPDATE SET data = excluded.data, ticker = excluded.ticker, tipo = excluded.tipo, qtd = excluded.qtd, preco = excluded.preco,
   custo = excluded.custo, banco = excluded.banco, importado = excluded.importado, lado = excluded.lado`)
   .bind(c.id, c.data, c.ticker, c.tipo, c.qtd, c.preco, c.custo, c.banco, agora(), c.importado, c.lado);
-const stmtProvento = (db, p) => db.prepare('INSERT OR REPLACE INTO proventos (id, data, ticker, tipo, valor, criado_em) VALUES (?1, ?2, ?3, ?4, ?5, ?6)')
-  .bind(p.id, p.data, p.ticker, p.tipo, p.valor, agora());
+const stmtProvento = (db, p) => db.prepare('INSERT OR REPLACE INTO proventos (id, data, ticker, tipo, valor, criado_em, banco) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)')
+  .bind(p.id, p.data, p.ticker, p.tipo, p.valor, agora(), p.banco);
 
 // ---------- cotações ----------
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';

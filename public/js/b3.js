@@ -51,8 +51,33 @@ export function normalizarTicker(t, conhecidos = new Set()) {
   if (conhecidos.has(x)) return x;
   // direito/recibo de ação (ITSA1, ITSA2, ITSA9…): se só um ativo do app tem a mesma raiz, é ele
   const raiz = x.slice(0, 4);
-  const mesmos = [...conhecidos].filter((k) => k.slice(0, 4) === raiz && /^[A-Z]{4}\d{1,2}$/.test(k));
+  const mesmos = [...conhecidos].filter((k) => k.slice(0, 4) === raiz && /^[A-Z][A-Z0-9]{3}\d{1,2}$/.test(k));
   return mesmos.length === 1 && /^[A-Z]{4}(1|2|9|10)$/.test(x) ? mesmos[0] : x;
+}
+
+// Instituição da B3 → banco do app. A B3 usa o nome da corretora ("NU INVEST CORRETORA…", "TORO CTVM LTDA").
+const INSTITUICOES = [
+  [/^nu (invest|investimentos)|nubank/, 'nubank'], [/\btoro\b/, 'toro'], [/\bxp\b/, 'xp'], [/\borama\b/, 'orama'], [/\bnikos\b/, 'nikos'],
+  [/\brico\b/, 'rico'], [/\bclear\b/, 'clear'], [/\bbtg\b/, 'btg'], [/\binter\b/, 'inter'], [/\bitau\b|\bion\b/, 'itau'],
+  [/bradesco|\bagora\b/, 'bradesco'], [/santander/, 'santander'], [/banco do brasil|\bbb\b/, 'bb'], [/\bc6\b/, 'c6'], [/genial/, 'genial'],
+  [/modal/, 'modal'], [/warren/, 'warren'], [/avenue/, 'avenue'], [/mercado pago/, 'mercadopago'], [/picpay/, 'picpay'],
+];
+const LIXO_NOME = /\b(s\.?\s?a\.?|ltda|ctvm|cctvm|dtvm|corretora|distribuidora|de|titulos|e|valores|mobiliarios|investimentos|banco|-)\b/g;
+/**
+ * Banco do app para o nome da instituição na B3.
+ * Devolve { id, nome, novo } — `novo` quando o banco ainda não existe na lista e precisa ser criado.
+ */
+export function bancoDaInstituicao(inst, bancos = []) {
+  const t = semAcento(inst);
+  if (!t) return null;
+  const regra = INSTITUICOES.find(([re]) => re.test(t));
+  const porNome = bancos.find((b) => { const n = semAcento(b.nome).split(/[\s(]/)[0]; return n.length > 2 && new RegExp(`\\b${n}\\b`).test(t); });
+  const id = regra?.[1] || porNome?.id;
+  const existente = bancos.find((b) => b.id === id);
+  if (existente) return { id: existente.id, nome: existente.nome, novo: false };
+  const limpo = t.replace(LIXO_NOME, ' ').replace(/\s+/g, ' ').trim() || t;
+  const nome = String(inst).split(/\s+/).filter((w) => limpo.split(' ').includes(semAcento(w))).map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') || String(inst).slice(0, 30);
+  return { id: id || limpo.split(' ')[0].replace(/[^a-z0-9]/g, '').slice(0, 20) || 'outro', nome, novo: true };
 }
 
 /** Tipo de provento a partir do nome da movimentação. */
@@ -90,6 +115,7 @@ export function lerMovimentacao(linhas, ctx = {}) {
     const preco = numero(l['preco unitario']);
     const valor = numero(l['valor da operacao']);
     const nome = String(l['movimentacao']).trim();
+    const inst = String(l['instituicao'] ?? '').trim();
 
     // Tesouro Direto: o produto vem com o nome do título ("Tesouro Selic 2031") e a movimentação é "Compra"/"Venda"
     if (/^tesouro\s/i.test(produto)) {
@@ -97,33 +123,34 @@ export function lerMovimentacao(linhas, ctx = {}) {
       const pu = preco > 0 ? preco : qtd > 0 && valor > 0 ? valor / qtd : null;
       const lado = mov.startsWith('compra') ? 'C' : /^(venda|resgate|vencimento)/.test(mov) ? 'V' : null;
       if (lado && qtd > 0 && pu > 0) {
-        operacoes.push({ liq: data, data, ticker: tTes, original: tTes, tipo: 'tesouro', lado, qtdB3: qtd, precoB3: pu, valor: round2(valor > 0 ? valor : qtd * pu), fator: 1 });
+        operacoes.push({ liq: data, data, ticker: tTes, original: tTes, tipo: 'tesouro', inst, lado, qtdB3: qtd, precoB3: pu, valor: round2(valor > 0 ? valor : qtd * pu), fator: 1 });
         continue;
       }
       const tipoT = credito && valor > 0 ? tipoProvento(mov, false) : null; // juros semestrais (cupom)
-      if (tipoT === 'juros') { proventos.push({ data, ticker: tTes, original: tTes, tipo: 'juros', valor: round2(valor) }); continue; }
+      if (tipoT === 'juros') { proventos.push({ data, ticker: tTes, original: tTes, tipo: 'juros', inst, valor: round2(valor) }); continue; }
       ignorados[nome] = (ignorados[nome] || 0) + 1;
       continue;
     }
 
     const original = produto.split(' - ')[0].trim().toUpperCase();
-    const ehTicker = /^[A-Z]{4}\d{1,2}[A-Z]?$/.test(original);
+    const ehTicker = /^[A-Z][A-Z0-9]{3}\d{1,2}[A-Z]?$/.test(original); // B3SA3 também
     const ticker = ehTicker ? normalizarTicker(original, conhecidos) : original;
     const tipoAtivo = tipos.get(ticker) || (/11$/.test(ticker) ? 'fii' : 'acao');
 
     if (ehTicker && mov.startsWith('transferencia - liquidacao') && qtd > 0 && preco > 0) {
       const pregao = dataPregao(data);
-      operacoes.push({ liq: data, data: pregao, ticker, original, tipo: tipoAtivo, lado: credito ? 'C' : 'V', qtdB3: qtd, precoB3: preco, valor: round2(qtd * preco), fator: fatorAte(ticker, pregao) });
+      operacoes.push({ liq: data, data: pregao, ticker, original, tipo: tipoAtivo, inst, lado: credito ? 'C' : 'V', qtdB3: qtd, precoB3: preco, valor: round2(qtd * preco), fator: fatorAte(ticker, pregao) });
       continue;
     }
     if (ehTicker && credito && mov.startsWith('bonificacao') && qtd > 0) {
-      operacoes.push({ liq: data, data, ticker, original, tipo: tipoAtivo, lado: 'B', qtdB3: qtd, precoB3: 0, valor: 0, fator: fatorAte(ticker, data) });
+      operacoes.push({ liq: data, data, ticker, original, tipo: tipoAtivo, inst, lado: 'B', qtdB3: qtd, precoB3: 0, valor: 0, fator: fatorAte(ticker, data) });
       continue;
     }
     const tipo = credito && valor > 0 && ehTicker ? tipoProvento(mov, tipoAtivo === 'fii') : null;
-    if (tipo) { proventos.push({ data, ticker, original, tipo, valor: round2(valor) }); continue; }
+    if (tipo) { proventos.push({ data, ticker, original, tipo, inst, valor: round2(valor) }); continue; }
     if (ehTicker && EVENTOS_COTAS.some((e) => mov.startsWith(e))) avisos.push({ data, ticker, nome, qtd, credito });
-    ignorados[nome] = (ignorados[nome] || 0) + 1;
+    const rotulo = ehTicker ? nome : `${produto.split(' - ')[0].trim()} (${nome.toLowerCase()})`; // CDB, LCA, Futuro…: o app não acompanha
+    ignorados[rotulo] = (ignorados[rotulo] || 0) + 1;
   }
   return { proventos, operacoes, avisos, ignorados };
 }

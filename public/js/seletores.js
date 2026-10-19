@@ -117,7 +117,7 @@ function melhorarSelect(sel) {
 
   const pintar = () => {
     const op = sel.options[sel.selectedIndex];
-    btn.innerHTML = `<span class="sel-txt">${icone(op)}${esc(op ? op.text : '')}</span>${SETA}`;
+    btn.innerHTML = `${icone(op)}<span class="sel-txt">${esc(op ? op.text : '')}</span>${SETA}`;
     btn.disabled = sel.disabled;
   };
   vigiarValor(sel, pintar);

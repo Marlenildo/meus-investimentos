@@ -839,5 +839,16 @@ html, body { overflow-x: clip; }
 .logo-banco { position: relative; display: inline-grid; place-items: center; width: 16px; height: 16px; flex: none; border-radius: 4px; overflow: hidden; background: var(--folha-2); color: var(--tinta-3); font: 700 0.5rem/1 var(--f-display); letter-spacing: -0.02em; box-shadow: inset 0 0 0 1px var(--linha); }
 .logo-banco img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; background: #fff; }
 .logo-banco img.ok { opacity: 1; }
-.sel-btn .logo-banco, .sel-op .logo-banco { margin-right: 7px; width: 18px; height: 18px; vertical-align: -4px; }
-.sel-op > span { display: inline-flex; align-items: center; }
+.sel-btn .logo-banco { width: 20px; height: 20px; margin-right: -2px; }
+.sel-op > span { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.sel-op .logo-banco { width: 20px; height: 20px; }
+/* banco no título: "Por tipo · [logo] Nubank" */
+.titulo-banco { display: inline-flex; align-items: center; gap: 6px; vertical-align: -3px; }
+.titulo-banco .logo-banco { width: 20px; height: 20px; border-radius: 5px; }
+/* por banco (Histórico, todos os bancos) */
+.pt-bancos { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; border-top: 1px solid var(--linha); }
+.pt-banco { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border: 1px solid var(--linha); border-radius: 999px; background: var(--folha-2); font-size: 0.84rem; cursor: pointer; color: var(--tinta); }
+.pt-banco:hover { border-color: var(--linha-forte); }
+.pt-banco .logo-banco { width: 24px; height: 24px; border-radius: 50%; }
+.pt-banco b { font-variant-numeric: tabular-nums; }
+.pt-banco small { color: var(--tinta-3); }

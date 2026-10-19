@@ -11,7 +11,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.6.1';
+export const VERSAO = '1.6.2';
 const VERSAO_DATA = '2026-10-19';
 
 let S = carregar();
@@ -93,6 +93,8 @@ function logoBanco(id, nome = banco(id)?.nome || id) {
   const img = site ? `<img src="https://www.google.com/s2/favicons?domain=${site}&sz=64" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onload="this.naturalWidth > 16 ? this.classList.add('ok') : this.remove()" onerror="this.remove()">` : '';
   return `<span class="logo-banco" aria-hidden="true">${ini}${img}</span>`;
 }
+/** "· [logo] Nubank" ao lado de um título, quando há banco escolhido no Histórico. */
+const tituloBanco = () => (G.banco ? ` <span class="graf-ativo-nome titulo-banco">· ${logoBanco(G.banco)}${esc(banco(G.banco)?.nome || G.banco)}</span>` : '');
 /** Logo + nome do banco, para rodapés de cartão e listas. */
 const comLogo = (id, nome = banco(id)?.nome || id) => `<span class="banco-tag">${logoBanco(id, nome)}${esc(nome)}</span>`;
 const proventosAuto = () => somaProventosMes(S.proventos, mesAnterior(S.plano.mes));
@@ -1002,7 +1004,7 @@ function htmlGrafico(largura) {
     <section class="bloco grafico-bloco" id="graf-hist">
       <div class="graf-topo">
         <div>
-          <h2>${acum ? 'Total acumulado' : 'Quanto investi'}${G.banco ? ` <span class="graf-ativo-nome">· ${esc(bancosUsados().find((b) => b.id === G.banco)?.nome || G.banco)}</span>` : ''}${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
+          <h2>${acum ? 'Total acumulado' : 'Quanto investi'}${tituloBanco()}${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
           <small class="sub-cab">${subCab}</small>
         </div>
         <div class="graf-controles">
@@ -1089,6 +1091,8 @@ window.addEventListener('resize', () => { clearTimeout(redimT); redimT = setTime
 function ligarHistorico() {
   ligarRemover('data-del-compra', 'compras');
   $('#conteudo').addEventListener('click', (e) => {
+    const fb = e.target.closest('[data-filtra-banco]');
+    if (fb) { G.banco = fb.dataset.filtraBanco; G.sel = null; salvarG(); render(); return; }
     const nova = e.target.closest('[data-nova-op]');
     if (nova) { abrirEditarCompra(null, nova.dataset.novaOp); return; }
     if (e.target.closest('[data-del-compra]')) return; // a lixeira não abre o editor
@@ -1301,7 +1305,7 @@ function htmlPorTipo(c) {
   const sw = (t) => `s-${NOMES_TIPO[t] ? t : 'outros'}`;
   return `
     <section class="bloco carteira-tipos">
-      <div class="bloco-cab"><h2>Por tipo${G.banco ? ` <span class="graf-ativo-nome">· ${esc(banco(G.banco).nome)}</span>` : ''}</h2><small>quanto da carteira está em cada tipo, pelo valor de hoje</small></div>
+      <div class="bloco-cab"><h2>Por tipo${tituloBanco()}</h2><small>quanto da carteira está em cada tipo, pelo valor de hoje</small></div>
       <div class="pt-barra" role="img" aria-label="${tipos.map((t) => `${NOMES_TIPO[t] || t} ${pc(g.get(t).valor)}`).join(', ')}">${tipos.map((t) => `<i class="${sw(t)}" style="width:${(g.get(t).valor / total) * 100}%"></i>`).join('')}</div>
       <div class="pt-lista">${tipos.map((t) => {
         const x = g.get(t);
@@ -1312,6 +1316,11 @@ function htmlPorTipo(c) {
           <span class="pt-valor num">${R(x.valor)}${r != null ? ` <small class="${r >= 0 ? 'var-alta' : 'var-baixa'}">${pct(r)}</small>` : ''}</span>
         </div>`;
       }).join('')}</div>
+      ${!G.banco && bancosUsados().length > 1 ? (() => {
+        // quanto está em cada banco (toque para filtrar)
+        const xs = bancosUsados().map((b) => ({ b, v: carteira(S.compras.filter((c) => bancoDe(c) === b.id), S.ativos, []).valorAtual })).filter((x) => x.v > 0.005);
+        return xs.length > 1 ? `<div class="pt-bancos">${xs.sort((a, b) => b.v - a.v).map(({ b, v }) => `<button type="button" class="pt-banco" data-filtra-banco="${esc(b.id)}" title="Ver só ${esc(b.nome)}">${logoBanco(b.id, b.nome)}<span>${esc(b.nome)}</span><b>${pc(v)}</b><small>${R(v)}</small></button>`).join('')}</div>` : '';
+      })() : ''}
     </section>`;
 }
 
@@ -1358,7 +1367,7 @@ function renderCarteira() {
 
 
     <section class="bloco">
-      <div class="bloco-cab"><h2>Operações${G.banco ? ` <span class="graf-ativo-nome">· ${esc(banco(G.banco).nome)}</span>` : ''}${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
+      <div class="bloco-cab"><h2>Operações${tituloBanco()}${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
         <div class="acoes"><button type="button" class="btn peq" data-nova-op="V">Registrar venda</button><button type="button" class="btn peq" data-nova-op="C">Compra antiga</button></div></div>
       ${[...porMes.entries()].map(([mes, xs], i) => `
         <details class="mes-grupo" ${i === 0 ? 'open' : ''}>

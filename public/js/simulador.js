@@ -168,12 +168,12 @@ export function simular(cfg, dados) {
         }
       }
       caixa = Math.max(0, resta);
-      serie.push({ data: d, aportado, total: pos.reduce((s, p) => s + valorItem(p, d), 0) + caixa + provFora });
+      serie.push({ data: d, aportado, total: pos.reduce((s, p) => s + valorItem(p, d), 0) + caixa + provFora, proventos: pos.reduce((s, p) => s + p.proventos, 0) });
     }
     anterior = d;
   }
   if (!serie.length || serie[serie.length - 1].data !== fim) {
-    serie.push({ data: fim, aportado, total: pos.reduce((s, p) => s + valorItem(p, fim), 0) + caixa + provFora });
+    serie.push({ data: fim, aportado, total: pos.reduce((s, p) => s + valorItem(p, fim), 0) + caixa + provFora, proventos: pos.reduce((s, p) => s + p.proventos, 0) });
   }
 
   const linhas = pos.map((p) => {
@@ -194,7 +194,9 @@ export function simular(cfg, dados) {
   const ir = linhas.reduce((s, l) => s + l.ir, 0);
   return {
     inicio: [...aportes][0], fim, meses: aportes.size, aportado, posicao, caixa, proventos, provFora,
-    total, ganho: total - aportado, ganhoPct: aportado ? total / aportado - 1 : 0, ir, liquido: total - ir,
+    total, ganho: total - aportado, ganhoPct: aportado ? total / aportado - 1 : 0,
+    // o ganho total se divide em valorização (preço das cotas ou rendimento da renda fixa) e proventos recebidos
+    valorizacao: total - aportado - proventos, ir, liquido: total - ir,
     custos: linhas.reduce((s, l) => s + l.custos, 0), linhas, serie,
   };
 }

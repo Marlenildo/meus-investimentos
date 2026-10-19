@@ -906,3 +906,19 @@ html, body { overflow-x: clip; }
 .sim-dica span { display: flex; align-items: center; gap: 6px; color: var(--tinta-2); }
 .sim-dica span b { margin-left: auto; padding-left: 10px; color: var(--tinta); }
 .sim-notas { padding: 0 4px; }
+.sim-comp > div > span:first-child small { display: block; font-size: 0.74rem; color: var(--tinta-3); }
+.sim-comp .sim-parte > span:first-child { padding-left: 12px; border-left: 2px solid var(--linha-forte); }
+.sim-comp .sim-total { border-top: 1px solid var(--linha-forte); }
+.sim-comp .sim-total > span:first-child { color: var(--tinta); font-weight: 600; }
+.sim-comp .sim-total .num { font: 700 1rem var(--f-display); }
+.sim-comp .sim-total .num small { font: 600 0.76rem var(--f-texto); }
+.sim-comp .forte small { font: 500 0.72rem var(--f-texto); color: var(--tinta-3); }
+.sim-dica .sim-dica-sub { padding-left: 16px; font-size: 0.74rem; color: var(--tinta-3); }
+.sim-comp .num { white-space: nowrap; }
+@media (max-width: 560px) {
+  .sim-comp > div { grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); row-gap: 4px; }
+  .sim-comp > div > span:first-child { grid-column: 1 / -1; }
+  .sim-comp > div > span:first-child small { display: inline; }
+  .sim-comp-cab > span:first-child { display: none; }
+  .sim-comp .sim-parte > span:first-child { padding-left: 8px; }
+}

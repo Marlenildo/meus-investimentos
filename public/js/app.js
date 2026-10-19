@@ -12,7 +12,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.7.0';
+export const VERSAO = '1.7.1';
 const VERSAO_DATA = '2026-10-19';
 
 let S = carregar();
@@ -1773,9 +1773,10 @@ function htmlResultadoSim() {
       <div class="sim-comp" style="--cols:${res.length}">
         <div class="sim-comp-cab"><span></span>${res.map((r, i) => `<b><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)}</b>`).join('')}</div>
         <div><span>Aportado</span>${res.map((r) => `<span class="num">${R(r.aportado)}</span>`).join('')}</div>
-        <div><span>Valor hoje</span>${res.map((r) => `<span class="num forte">${R(r.total)}</span>`).join('')}</div>
-        <div><span>Ganho</span>${res.map((r) => `<span class="num ${cls(r.ganho)}">${R(r.ganho)} <small>${pct(r.ganhoPct)}</small></span>`).join('')}</div>
-        <div><span>Proventos</span>${res.map((r) => `<span class="num">${r.proventos ? R(r.proventos) : '—'}</span>`).join('')}</div>
+        <div><span>Valor hoje</span>${res.map((r) => `<span class="num forte">${R(r.total)}${r.provFora > 0.005 ? `<small>com ${R(r.provFora)} de proventos guardados</small>` : ''}</span>`).join('')}</div>
+        <div class="sim-parte"><span>Valorização <small>(preço das cotas e rendimento da renda fixa)</small></span>${res.map((r) => `<span class="num ${cls(r.valorizacao)}">${r.valorizacao >= 0 ? '+' : '−'} ${R(Math.abs(r.valorizacao))} <small>${pct(r.aportado ? r.valorizacao / r.aportado : null)}</small></span>`).join('')}</div>
+        <div class="sim-parte"><span>Proventos recebidos <small>(dividendos, JCP, rendimentos)</small></span>${res.map((r) => `<span class="num ${r.proventos ? 'var-alta' : ''}">${r.proventos ? `+ ${R(r.proventos)} <small>${pct(r.aportado ? r.proventos / r.aportado : null)}</small>` : '—'}</span>`).join('')}</div>
+        <div class="sim-total"><span>Ganho total <small>valorização + proventos</small></span>${res.map((r) => `<span class="num ${cls(r.ganho)}">${r.ganho >= 0 ? '+' : '−'} ${R(Math.abs(r.ganho))} <small>${pct(r.ganhoPct)}</small></span>`).join('')}</div>
         ${temRF ? `<div><span>Se resgatasse hoje <small>(− IR da renda fixa)</small></span>${res.map((r) => `<span class="num">${R(r.liquido)}</span>`).join('')}</div>` : ''}
       </div>
     </section>
@@ -1872,7 +1873,7 @@ function desenharGraficoSim() {
     res.forEach((rr, k) => { pts[k].setAttribute('cx', x(i)); pts[k].setAttribute('cy', y(rr.serie[i].total)); });
     pts[res.length].setAttribute('cx', x(i)); pts[res.length].setAttribute('cy', y(serie[i].aportado));
     dica.hidden = false;
-    dica.innerHTML = `<b>${dataBR(serie[i].data)}</b>${res.map((rr, k) => `<span><i class="sw sim-sw-${CORES_SIM[k]}"></i>${esc(cfg.carteiras[k].nome)} <b class="num">${R(rr.serie[i].total)}</b></span>`).join('')}<span><i class="sw sim-sw-inv"></i>Aportado <b class="num">${R(serie[i].aportado)}</b></span>`;
+    dica.innerHTML = `<b>${dataBR(serie[i].data)}</b>${res.map((rr, k) => `<span><i class="sw sim-sw-${CORES_SIM[k]}"></i>${esc(cfg.carteiras[k].nome)} <b class="num">${R(rr.serie[i].total)}</b></span>${rr.serie[i].proventos > 0.005 ? `<span class="sim-dica-sub">proventos até aqui <b class="num">${R(rr.serie[i].proventos)}</b></span>` : ''}`).join('')}<span><i class="sw sim-sw-inv"></i>Aportado <b class="num">${R(serie[i].aportado)}</b></span>`;
     const esq = (x(i) / W) * r.width;
     dica.style.left = `${Math.min(Math.max(0, esq - dica.offsetWidth / 2), r.width - dica.offsetWidth)}px`;
   };

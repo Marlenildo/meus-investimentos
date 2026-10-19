@@ -1,5 +1,6 @@
 // Lê o extrato de Movimentação da Área do Investidor da B3 (.xlsx ou .csv)
-// e separa o que é novo: proventos, frações, resgates, bonificações e compras/vendas que ainda não estão no app.
+// e separa o que é novo: proventos, frações, resgates, bonificações e compras/vendas (inclusive do Tesouro Direto)
+// que ainda não estão no app.
 //
 // O app guarda tudo pelo nome e pela quantidade de HOJE; a B3 mostra como era no dia. Por isso:
 // - ticker antigo vira o atual (IRDM11 → IRIM11) e recibos/direitos de FII (IRIM15) viram a cota (IRIM11);
@@ -85,14 +86,30 @@ export function lerMovimentacao(linhas, ctx = {}) {
     const data = dataISO(l['data']);
     if (!mov || !produto || !data) continue;
     const credito = semAcento(l['entrada/saida']).startsWith('cred');
-    const original = produto.split(' - ')[0].trim().toUpperCase();
-    const ehTicker = /^[A-Z]{4}\d{1,2}[A-Z]?$/.test(original);
-    const ticker = ehTicker ? normalizarTicker(original, conhecidos) : original;
     const qtd = numero(l['quantidade']);
     const preco = numero(l['preco unitario']);
     const valor = numero(l['valor da operacao']);
-    const tipoAtivo = tipos.get(ticker) || (/11$/.test(ticker) ? 'fii' : 'acao');
     const nome = String(l['movimentacao']).trim();
+
+    // Tesouro Direto: o produto vem com o nome do título ("Tesouro Selic 2031") e a movimentação é "Compra"/"Venda"
+    if (/^tesouro\s/i.test(produto)) {
+      const tTes = [...conhecidos].find((k) => semAcento(k) === semAcento(produto)) || produto.replace(/\s+/g, ' ');
+      const pu = preco > 0 ? preco : qtd > 0 && valor > 0 ? valor / qtd : null;
+      const lado = mov.startsWith('compra') ? 'C' : /^(venda|resgate|vencimento)/.test(mov) ? 'V' : null;
+      if (lado && qtd > 0 && pu > 0) {
+        operacoes.push({ liq: data, data, ticker: tTes, original: tTes, tipo: 'tesouro', lado, qtdB3: qtd, precoB3: pu, valor: round2(valor > 0 ? valor : qtd * pu), fator: 1 });
+        continue;
+      }
+      const tipoT = credito && valor > 0 ? tipoProvento(mov, false) : null; // juros semestrais (cupom)
+      if (tipoT === 'juros') { proventos.push({ data, ticker: tTes, original: tTes, tipo: 'juros', valor: round2(valor) }); continue; }
+      ignorados[nome] = (ignorados[nome] || 0) + 1;
+      continue;
+    }
+
+    const original = produto.split(' - ')[0].trim().toUpperCase();
+    const ehTicker = /^[A-Z]{4}\d{1,2}[A-Z]?$/.test(original);
+    const ticker = ehTicker ? normalizarTicker(original, conhecidos) : original;
+    const tipoAtivo = tipos.get(ticker) || (/11$/.test(ticker) ? 'fii' : 'acao');
 
     if (ehTicker && mov.startsWith('transferencia - liquidacao') && qtd > 0 && preco > 0) {
       const pregao = dataPregao(data);
@@ -146,7 +163,8 @@ export function novidades(lido, existentes) {
     return { id: `${base}${n}`, ...resto2 };
   });
 
-  const compras = (existentes.compras || []).filter((c) => c.tipo !== 'tesouro');
+  // Tesouro também entra: o nome do título já separa (Selic 2029 ≠ Selic 2031) e a data é a do dia da compra
+  const compras = existentes.compras || [];
   const usadasC = new Set();
   const bate = (o, cs) => {
     const q = cs.reduce((s, c) => s + Number(c.qtd), 0);

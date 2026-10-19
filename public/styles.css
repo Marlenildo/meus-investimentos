@@ -813,3 +813,15 @@ html, body { overflow-x: clip; }
 .pv-meses button { height: 28px; padding: 0 12px; font-size: 0.8rem; }
 .pv-meses .cap { text-transform: capitalize; }
 .seg-rola { position: relative; }
+
+/* Histórico: % da carteira por tipo */
+.s-bdr { fill: #e0773a; background: #e0773a; }
+.s-etf { fill: #4f74d9; background: #4f74d9; }
+.pt-barra { display: flex; height: 12px; border-radius: 6px; overflow: hidden; gap: 2px; margin: 4px 0 12px; background: var(--linha); }
+.pt-barra i { display: block; min-width: 3px; }
+.pt-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 16px; }
+.pt-item { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 8px 0; border-top: 1px solid var(--linha); }
+.pt-nome { display: flex; align-items: center; gap: 6px; font-weight: 600; min-width: 0; }
+.pt-nome small { display: inline; color: var(--tinta-3); font-weight: 500; font-size: 0.76rem; }
+.pt-pct { font: 700 1.1rem var(--f-display); text-align: right; }
+.pt-valor { grid-column: 1 / -1; color: var(--tinta-2, var(--tinta-3)); font-size: 0.85rem; }

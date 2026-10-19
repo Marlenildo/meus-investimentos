@@ -1238,6 +1238,40 @@ function niceStep(x) {
   return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
 }
 
+// ---------- quanto da carteira está em cada tipo (ações, FIIs, Tesouro, BDR, ETF…) ----------
+const NOMES_TIPO = { acao: 'Ações', fii: 'Fundos imobiliários', tesouro: 'Tesouro', bdr: 'BDR', etf: 'ETF' };
+const ORDEM_TIPO = ['acao', 'fii', 'tesouro', 'bdr', 'etf'];
+function htmlPorTipo(c) {
+  const g = new Map();
+  for (const l of c.linhas) {
+    const t = S.ativos.find((a) => a.ticker === l.ticker)?.tipo || l.tipo || 'outros';
+    const x = g.get(t) || { valor: 0, investido: 0, n: 0 };
+    x.valor += l.valorAtual ?? l.investido;
+    x.investido += l.investido;
+    x.n++;
+    g.set(t, x);
+  }
+  const total = [...g.values()].reduce((s, x) => s + x.valor, 0);
+  if (!total || !g.size) return '';
+  const tipos = [...g.keys()].sort((a, b) => g.get(b).valor - g.get(a).valor || ORDEM_TIPO.indexOf(a) - ORDEM_TIPO.indexOf(b));
+  const pc = (v) => `${(v / total * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+  const sw = (t) => `s-${NOMES_TIPO[t] ? t : 'outros'}`;
+  return `
+    <section class="bloco carteira-tipos">
+      <div class="bloco-cab"><h2>Por tipo</h2><small>quanto da carteira está em cada tipo, pelo valor de hoje</small></div>
+      <div class="pt-barra" role="img" aria-label="${tipos.map((t) => `${NOMES_TIPO[t] || t} ${pc(g.get(t).valor)}`).join(', ')}">${tipos.map((t) => `<i class="${sw(t)}" style="width:${(g.get(t).valor / total) * 100}%"></i>`).join('')}</div>
+      <div class="pt-lista">${tipos.map((t) => {
+        const x = g.get(t);
+        const r = x.investido ? x.valor / x.investido - 1 : null;
+        return `<div class="pt-item">
+          <span class="pt-nome"><i class="sw ${sw(t)}"></i>${esc(NOMES_TIPO[t] || t)}<small>${x.n} ${x.n === 1 ? 'ativo' : 'ativos'}</small></span>
+          <b class="pt-pct num">${pc(x.valor)}</b>
+          <span class="pt-valor num">${R(x.valor)}${r != null ? ` <small class="${r >= 0 ? 'var-alta' : 'var-baixa'}">${pct(r)}</small>` : ''}</span>
+        </div>`;
+      }).join('')}</div>
+    </section>`;
+}
+
 function renderCarteira() {
   if (!S.compras.length) {
     return `<section class="bloco"><div class="vazio"><h2>Sua carteira aparece aqui</h2><p>Depois de comprar no banco, toque em <b>Comprei — registrar</b> na tela inicial. Aqui você vê cotas, preço médio, quanto investiu e o retorno.</p><a class="btn prim" href="#comprar">Ir para Comprar</a></div></section>`;
@@ -1272,6 +1306,8 @@ function renderCarteira() {
         <div class="liq-desc"><span class="var-baixa">− ${R(desc)}</span><small>${partes}</small></div>
       </div>`;
     })()}
+
+    ${htmlPorTipo(c)}
 
     ${htmlGrafico()}
 
@@ -1819,11 +1855,11 @@ function abrirResumoB3(res) {
       </div>` : ''}
       ${operacoes.length ? `<div class="b3-bloco">
         <div class="cc-linha"><b>${operacoes.length} ${operacoes.length === 1 ? 'operação que não está' : 'operações que não estão'} no app</b></div>
-        <small class="dica">Compras e vendas liquidadas na B3 sem registro aqui. A data é a do pregão (dois dias úteis antes da liquidação) e a taxa é estimada pelo seu banco. Desmarque o que não quiser.</small>
+        <small class="dica">Compras e vendas liquidadas na B3 sem registro aqui. A data é a do pregão (dois dias úteis antes da liquidação) e a taxa é estimada pelo seu banco; no Tesouro, data e preço são os exatos da B3, sem taxa. Desmarque o que não quiser.</small>
         <div class="b3-lista">${operacoes.map((o, i) => `<label class="cc-linha b3-op"><span><input type="checkbox" data-b3-op="${i}" checked> ${dataBR(o.data).slice(0, 5)} <b>${esc(o.ticker)}</b> <small>${o.lado === 'V' ? 'venda' : o.lado === 'B' ? 'bonificação' : 'compra'} · ${fmtQtd(o.qtd)}${o.lado === 'B' ? ' cotas' : ` × ${R(o.preco)}`}${o.original !== o.ticker ? ` · era ${esc(o.original)}` : ''}${o.fator !== 1 ? ' · já com o desdobramento' : ''}</small></span><span class="num">${o.lado === 'B' ? '' : R(o.qtd * o.preco)}</span></label>`).join('')}</div>
       </div>` : ''}
       ${res.avisos.length ? `<p class="aviso">Confira à mão, o app não ajusta sozinho: ${res.avisos.map((a) => `${esc(a.nome)} de ${esc(a.ticker)} em ${dataBR(a.data)}`).join('; ')}.</p>` : ''}
-      ${ignorados.length ? `<p class="dica">Sem efeito no app: ${ignorados.map(([n, q]) => `${esc(n)}${q > 1 ? ` (${q})` : ''}`).join(', ')}. Tesouro Direto não vem por aqui.</p>` : ''}
+      ${ignorados.length ? `<p class="dica">Sem efeito no app: ${ignorados.map(([n, q]) => `${esc(n)}${q > 1 ? ` (${q})` : ''}`).join(', ')}.</p>` : ''}
       <div class="acoes"><span class="esp"></span><button class="btn" value="cancelar" formnovalidate>${proventos.length || operacoes.length ? 'Cancelar' : 'Fechar'}</button>${proventos.length || operacoes.length ? '<button class="btn prim" value="ok">Adicionar ao app</button>' : ''}</div>
     </form>`;
   dlg.oninput = null;
@@ -1831,7 +1867,7 @@ function abrirResumoB3(res) {
     if (dlg.returnValue !== 'ok') return;
     const marcadas = [...dlg.querySelectorAll('[data-b3-op]')].filter((c) => c.checked).map((c) => operacoes[Number(c.dataset.b3Op)]);
     const bk = banco();
-    const novas = marcadas.map((o) => ({ id: uid(), data: o.data, ticker: o.ticker, tipo: S.ativos.find((a) => a.ticker === o.ticker)?.tipo || o.tipo, qtd: o.qtd, preco: o.preco, custo: o.lado === 'B' ? 0 : custoOrdem({ tipo: o.tipo }, o.qtd, o.preco, bk), banco: bk.id, ...(o.lado !== 'C' ? { lado: o.lado } : {}) }));
+    const novas = marcadas.map((o) => ({ id: uid(), data: o.data, ticker: o.ticker, tipo: S.ativos.find((a) => a.ticker === o.ticker)?.tipo || o.tipo, qtd: o.qtd, preco: o.preco, custo: o.lado === 'B' || o.tipo === 'tesouro' ? 0 : custoOrdem({ tipo: o.tipo }, o.qtd, o.preco, bk), banco: bk.id, ...(o.lado !== 'C' ? { lado: o.lado } : {}) }));
     if (novas.length) { S.compras.push(...novas); N.adicionarCompras(novas); }
     if (proventos.length) { S.proventos.push(...proventos); N.adicionarProvento(proventos); }
     garantirAtivosDaCarteira();

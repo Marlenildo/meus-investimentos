@@ -51,6 +51,48 @@ export function datasDeAporte(calendario, inicioYm, fim) {
   }
   return out;
 }
+/** Opções de dia do aporte: 1º dia útil, um dia fixo do mês (vai para o próximo dia útil) ou o último dia útil. */
+export const DIAS_APORTE = [['util1', '1º dia útil'], ...[5, 10, 15, 20, 25].map((n) => [String(n), `Dia ${n}`]), ['ultimo', 'Último dia útil']];
+
+/**
+ * Lançamentos de aporte entre cfg.de e cfg.ate: um por mês pela regra (cfg.dia), com as edições feitas à mão
+ * (cfg.edicoes[chave] = { data, valor } ou { fora: true }) e os aportes extras (cfg.extras = [{ id, data, valor }]).
+ * Datas sem pregão vão para o próximo dia útil. Devolve { lista, removidos }.
+ */
+export function agendaAportes(calendario, cfg) {
+  const ini = cfg.de || `${cfg.inicio}-01`;
+  const ultimoCal = calendario[calendario.length - 1];
+  const fim = cfg.ate && cfg.ate < ultimoCal ? cfg.ate : ultimoCal;
+  const dias = calendario.filter((d) => d >= ini && d <= fim);
+  const proximoUtil = (d) => dias.find((x) => x >= d) || null;
+  const porMes = groupByMes(dias);
+  const regra = cfg.dia || 'util1';
+  const lista = [], removidos = [];
+  for (const [mes, ds] of porMes) {
+    let base;
+    if (regra === 'ultimo') base = ds[ds.length - 1];
+    else if (regra === 'util1') base = ds[0];
+    else base = ds.find((x) => x >= `${mes}-${String(regra).padStart(2, '0')}`) || null;
+    if (!base) continue; // o dia escolhido ainda não chegou neste mês, ou caiu antes do início
+    const e = cfg.edicoes?.[base];
+    if (e?.fora) { removidos.push({ chave: base, data: base, valor: Number(cfg.aporte) }); continue; }
+    const data = e?.data ? proximoUtil(e.data) : base;
+    if (!data) continue;
+    lista.push({ chave: base, data, valor: e?.valor != null ? Number(e.valor) : Number(cfg.aporte), editado: Boolean(e) });
+  }
+  for (const x of cfg.extras || []) {
+    const data = x.data >= ini ? proximoUtil(x.data) : null;
+    if (data) lista.push({ chave: `x:${x.id}`, extra: true, data, valor: Number(x.valor) || 0, editado: true });
+  }
+  lista.sort((a, b) => a.data.localeCompare(b.data) || (a.extra ? 1 : 0) - (b.extra ? 1 : 0));
+  return { lista, removidos, ini, fim };
+}
+function groupByMes(dias) {
+  const m = new Map();
+  for (const d of dias) { const k = d.slice(0, 7); if (!m.has(k)) m.set(k, []); m.get(k).push(d); }
+  return m;
+}
+
 /** Busca, numa lista ordenada [[data, ...], ...], a última linha com data <= d. */
 function linhaAte(lista, d) {
   let lo = 0, hi = lista.length - 1, r = -1;
@@ -101,13 +143,16 @@ export function simular(cfg, dados) {
   if (!calendario.length) throw new Error('sem o calendário de dias úteis (Selic)');
   const pesoTotal = cfg.itens.reduce((s, it) => s + Math.max(0, Number(it.peso) || 0), 0);
   if (!pesoTotal) throw new Error('coloque um percentual em pelo menos um investimento');
-  const fim = calendario[calendario.length - 1];
   for (const it of cfg.itens) {
     if (it.tipo === 'bolsa' && !dados.precos[it.ticker]?.dias?.length) throw new Error(`sem preços de ${it.ticker}`);
   }
-  const aportes = new Set(datasDeAporte(calendario, cfg.inicio, fim));
-  if (!aportes.size) throw new Error('nenhum dia útil no período escolhido');
-  const inicioDia = `${cfg.inicio}-01`;
+  const agenda = agendaAportes(calendario, cfg);
+  const fim = agenda.fim;
+  const inicioDia = agenda.ini;
+  if (fim < inicioDia) throw new Error('o fim do período vem antes do início');
+  const aportes = new Map();
+  for (const a of agenda.lista) { if (!aportes.has(a.data)) aportes.set(a.data, []); aportes.get(a.data).push(a); }
+  if (!agenda.lista.length) throw new Error('nenhum aporte no período escolhido');
   const modo = cfg.proventos || (cfg.reinvestir === false ? 'guardar' : 'dentro');
   const modoPreco = PRECOS_COMPRA[cfg.preco] ? cfg.preco : 'fechamento';
 
@@ -193,12 +238,12 @@ export function simular(cfg, dados) {
     const hoje = aPagar.filter((x) => x.pag <= d);
     aPagar = aPagar.filter((x) => x.pag > d);
     for (const x of hoje) receber(x, d);
-    // 4. aporte do mês
-    if (aportes.has(d)) {
+    // 4. aportes do dia (normalmente um por mês; edições e extras podem cair no mesmo dia)
+    for (const ap of aportes.get(d) || []) {
       const m = doMes(d);
-      const investir = modo === 'dentro' ? Math.max(cfg.aporte, provPend) : cfg.aporte + provPend;
-      const doBolso = modo === 'dentro' ? Math.max(0, cfg.aporte - provPend) : cfg.aporte;
-      ops.push({ tipo: 'aporte', data: d, bolso: doBolso, reinvestido: provPend, sobra: caixa, total: investir + caixa });
+      const investir = modo === 'dentro' ? Math.max(ap.valor, provPend) : ap.valor + provPend;
+      const doBolso = modo === 'dentro' ? Math.max(0, ap.valor - provPend) : ap.valor;
+      ops.push({ tipo: 'aporte', data: d, chave: ap.chave, extra: Boolean(ap.extra), editado: ap.editado, valor: ap.valor, bolso: doBolso, reinvestido: provPend, sobra: caixa, total: investir + caixa });
       bolso += doBolso; reinvestido += provPend; m.bolso += doBolso; m.reinvestido += provPend;
       provPend = 0;
       const disponivel = caixa + investir;
@@ -273,7 +318,8 @@ export function simular(cfg, dados) {
   const irJcp = ops.filter((o) => o.tipo === 'provento').reduce((s, o) => s + o.ir, 0);
   const valorizacao = total - bolso - proventos;
   return {
-    inicio: [...aportes][0], fim, nAportes: aportes.size, modo, modoPreco, aporteMes: cfg.aporte,
+    inicio: agenda.lista[0].data, de: inicioDia, fim, ateHoje: fim === calendario[calendario.length - 1], nAportes: agenda.lista.length,
+    agenda: agenda.lista, removidos: agenda.removidos, nEditados: agenda.lista.filter((a) => a.editado).length + agenda.removidos.length, modo, modoPreco, aporteMes: cfg.aporte,
     bolso, reinvestido, investido: bolso + reinvestido, posicao, caixa, provPend, proventos, provTipos, irJcp, provFora,
     aReceber, aReceberTotal: aReceber.reduce((s, x) => s + x.valor, 0),
     // ganho sobre o que saiu do bolso = valorização das cotas + rendimento da renda fixa + proventos recebidos

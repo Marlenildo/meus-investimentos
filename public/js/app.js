@@ -7,13 +7,13 @@ import { lerMovimentacao, novidades, bancoDaInstituicao } from './b3.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
 import * as N from './nuvem.js';
-import { simular, TIPOS_SIM, seriesNecessarias, resumoPorPeriodoSim, PRECOS_COMPRA, TIPOS_PROV_SIM } from './simulador.js';
+import { simular, TIPOS_SIM, seriesNecessarias, resumoPorPeriodoSim, PRECOS_COMPRA, TIPOS_PROV_SIM, DIAS_APORTE } from './simulador.js';
 import { CATALOGO, NOME_CLASSE_CAT, buscarNoCatalogo } from './catalogo.js';
 import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.10.0';
+export const VERSAO = '1.11.0';
 const VERSAO_DATA = '2026-10-19';
 
 let S = carregar();
@@ -237,9 +237,12 @@ function pintarTotais() {
     const q = Number(S.plano.qtds[a.id]) || 0;
     const l = linhaPlano(a, q, b);
     const aviso = avisoMinimo(a, q);
+    const pc = Number(S.ajustes.pcts?.[a.ticker]) || 0;
+    const tot = resumo(b).total;
+    const pcTxt = pc ? `<small class="o-pc" title="% escolhida em Dividir em %">${q > 0 && tot ? `${fmtPct0(l.total / tot * 100)} · ` : ''}alvo ${fmtPct0(pc)}</small>` : '';
     el.innerHTML = q > 0
-      ? `<span class="num">${R(l.total)}</span>${aviso ? `<small class="warn">${esc(aviso)}</small>` : ''}`
-      : '<span class="num apagado">—</span>';
+      ? `<span class="num">${R(l.total)}</span>${aviso ? `<small class="warn">${esc(aviso)}</small>` : ''}${pcTxt}`
+      : `<span class="num apagado">—</span>${pcTxt}`;
     el.closest('.ordem').classList.toggle('tem-qtd', q > 0);
   }
   const r = resumo();
@@ -309,7 +312,7 @@ function renderComprar() {
           <select id="ordenar" class="peq" aria-label="Ordenar a lista">
             <option value="">Ordenar…</option><option value="tipo">Por tipo</option><option value="az">A → Z</option><option value="posicao">Maior posição</option>
           </select>
-          <button type="button" class="btn peq" id="btn-dividir" title="Divide o valor igualmente entre os ativos">Dividir</button>
+          <button type="button" class="btn peq" id="btn-dividir" title="Divide o valor entre os ativos pela % de cada um">Dividir em %</button>
           <button type="button" class="btn peq" id="btn-limpar">Zerar</button>
           <button type="button" class="btn peq ${editandoLista ? 'ativo' : ''}" id="btn-editar" aria-pressed="${editandoLista}">${editandoLista ? 'Pronto' : 'Editar'}</button>
           <button type="button" class="icone-btn ${atualizando ? 'girando' : ''}" id="btn-cotacoes" title="Atualizar preços" aria-label="Atualizar preços">${ICONE_ATUALIZAR}</button>
@@ -356,20 +359,8 @@ function ligarComprar() {
   $('#btn-editar').addEventListener('click', () => { editandoLista = !editandoLista; render(); });
   $('#btn-registrar').addEventListener('click', abrirRegistrar);
 
-  // dividir igual: o valor para investir dividido pelo número de ativos, como na planilha
-  $('#btn-dividir').addEventListener('click', () => {
-    const comPreco = S.ativos.filter((a) => a.preco > 0);
-    if (!comPreco.length) { toast('Informe os preços primeiro.'); return; }
-    const parte = disponivel() / comPreco.length;
-    const b = banco();
-    S.plano.qtds = {};
-    for (const a of comPreco) {
-      const q = qtdMaxima(a, 0, parte, b);
-      if (q > 0) S.plano.qtds[a.id] = q;
-    }
-    persist('plano'); render();
-    toast(`${R(parte)} para cada ativo. Ajuste à vontade.`);
-  });
+  // dividir: em partes iguais ou pela % de cada ativo
+  $('#btn-dividir').addEventListener('click', abrirDividir);
 
   // adicionar ativo direto na tela
   const form = $('#form-add'), addT = $('#add-ticker'), addTipo = $('#add-tipo');
@@ -601,6 +592,91 @@ function abrirRegistrar() {
     render();
   };
   dlg.returnValue = '';
+  dlg.showModal();
+}
+
+// ---------- dividir o valor para investir pela % de cada ativo ----------
+/**
+ * Divide um valor entre os ativos pelos percentuais: cada um recebe a sua parte e compra o que cabe nela
+ * (cotas inteiras na bolsa). Se as % somam 100, a sobra compra mais uma cota de quem ficou mais longe da sua parte.
+ */
+function distribuirPorPct(ativos, pcts, valor, b) {
+  const soma = ativos.reduce((s2, a) => s2 + (pcts[a.ticker] || 0), 0);
+  const linhas = ativos.map((a) => {
+    const pc = pcts[a.ticker] || 0;
+    const verba = valor * pc / 100;
+    const q = a.preco > 0 && verba > 0 ? qtdMaxima(a, 0, verba, b) : 0;
+    return { a, pc, verba, q, total: linhaPlano(a, q, b).total };
+  });
+  let resta = valor - linhas.reduce((s2, l) => s2 + l.total, 0);
+  if (Math.abs(soma - 100) < 0.01) {
+    for (const l of linhas.filter((x) => x.pc > 0 && x.a.preco > 0).sort((x, y) => (y.verba - y.total) - (x.verba - x.total))) {
+      const mais = normalizaQtd(l.a, l.q + passoDe(l.a));
+      const extra = linhaPlano(l.a, mais, b).total - l.total;
+      if (extra <= resta + 0.001) { l.q = mais; l.total += extra; resta -= extra; }
+    }
+  }
+  return { linhas, soma, resta: round2(resta) };
+}
+
+function abrirDividir() {
+  const b = banco();
+  const ativos = S.ativos.filter((a) => a.tipo !== 'rf');
+  if (!ativos.length) { toast('Adicione ativos primeiro.'); return; }
+  const salvos = S.ajustes.pcts || {};
+  const pcts = Object.fromEntries(ativos.map((a) => [a.ticker, Number(salvos[a.ticker]) || 0]));
+  let valor = disponivel();
+  const dlg = $('#dlg-compra');
+  const fmtPc = (v) => (v ? String(round2(v)).replace('.', ',') : '');
+  dlg.innerHTML = `
+    <form method="dialog" class="form-edit dividir-form">
+      <h2>Dividir a compra</h2>
+      <p class="dica">Diga quanto de cada ativo você quer. O app calcula quantas cotas cabem em cada parte, já com as taxas do ${esc(b.nome)}.</p>
+      <label class="campo dv-valor"><span>Valor para dividir</span><input id="dv-valor" class="num" inputmode="decimal" value="${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"><span class="sub">aporte + proventos: ${R(disponivel())}</span></label>
+      <div class="dv-atalhos"><button type="button" class="btn peq" id="dv-igual">Partes iguais</button><button type="button" class="btn peq" id="dv-zerar">Zerar %</button></div>
+      <div class="dv-lista">${ativos.map((a) => `<div class="dv-item" data-tk="${esc(a.ticker)}">
+        ${htmlLogo(a)}
+        <span class="dv-nome"><b>${esc(a.ticker)}</b><small>${a.preco > 0 ? R(a.preco) : 'sem preço'}</small></span>
+        <span class="dv-pc"><input class="num" inputmode="decimal" data-pc="${esc(a.ticker)}" value="${fmtPc(pcts[a.ticker])}" placeholder="0" aria-label="% em ${esc(a.ticker)}" ${a.preco > 0 ? '' : 'disabled'}><small>%</small></span>
+        <span class="dv-res num" data-res="${esc(a.ticker)}"></span>
+      </div>`).join('')}</div>
+      <div class="dv-rodape" id="dv-rodape"></div>
+      <div class="acoes"><span class="esp"></span><button class="btn" value="cancelar" formnovalidate>Cancelar</button><button class="btn prim" value="ok">Usar na compra</button></div>
+    </form>`;
+  const pintar = () => {
+    const d = distribuirPorPct(ativos, pcts, valor, b);
+    for (const l of d.linhas) {
+      const el = dlg.querySelector(`[data-res="${CSS.escape(l.a.ticker)}"]`);
+      el.innerHTML = l.pc > 0 && l.a.preco > 0 ? `<b>${fmtQtd(l.q)} ${unidade(l.a.tipo, l.q)}</b><small>${R(l.total)} de ${R(l.verba)}</small>` : '<small>—</small>';
+    }
+    const ok = Math.abs(d.soma - 100) < 0.01;
+    const usado = d.linhas.reduce((s2, l) => s2 + l.total, 0);
+    $('#dv-rodape', dlg).innerHTML = `<span class="${ok ? '' : d.soma > 100 ? 'var-baixa' : 'dv-falta'}">Soma <b>${fmtPct0(d.soma)}</b>${ok ? '' : d.soma > 100 ? ' — passou de 100%' : ` — faltam ${fmtPct0(100 - d.soma)}`}</span><span>Na compra <b>${R(usado)}</b> · sobra <b>${R(valor - usado)}</b></span>`;
+    $('button[value="ok"]', dlg).disabled = d.soma > 100.001 || d.soma <= 0;
+  };
+  dlg.oninput = (e) => {
+    if (e.target.id === 'dv-valor') valor = num(e.target.value) || 0;
+    if (e.target.dataset.pc) pcts[e.target.dataset.pc] = Math.max(0, num(e.target.value) || 0);
+    pintar();
+  };
+  dlg.onchange = null;
+  const repor = () => { dlg.querySelectorAll('[data-pc]').forEach((i) => { i.value = fmtPc(pcts[i.dataset.pc]); }); pintar(); };
+  $('#dv-igual', dlg).addEventListener('click', () => {
+    const com = ativos.filter((a) => a.preco > 0);
+    com.forEach((a, i) => { pcts[a.ticker] = i < com.length - 1 ? Math.floor(10000 / com.length) / 100 : round2(100 - Math.floor(10000 / com.length) / 100 * (com.length - 1)); });
+    repor();
+  });
+  $('#dv-zerar', dlg).addEventListener('click', () => { for (const k of Object.keys(pcts)) pcts[k] = 0; repor(); });
+  dlg.onclose = () => {
+    if (dlg.returnValue !== 'ok') return;
+    const d = distribuirPorPct(ativos, pcts, valor, b);
+    S.plano.qtds = {};
+    for (const l of d.linhas) if (l.q > 0) S.plano.qtds[l.a.id] = l.q;
+    S.ajustes.pcts = Object.fromEntries(Object.entries(pcts).filter(([, v]) => v > 0));
+    persist('ajustes', 'plano'); render();
+    toast(d.resta > 0.005 ? `Compra montada. Sobram ${R(valor - d.linhas.reduce((s2, l) => s2 + l.total, 0))}.` : 'Compra montada pelas suas %.');
+  };
+  pintar();
   dlg.showModal();
 }
 
@@ -1710,9 +1786,10 @@ function ligarProventos() {
 // Cada carteira tem as próprias opções: aporte, o que fazer com os proventos e o preço de compra.
 const SIM_KEY = 'meus-investimentos:simulador';
 const CORES_SIM = ['a', 'b'];
-const novaCarteiraSim = (nome, itens) => ({ nome, aporte: Number(S.ajustes.aporteMensal) || 2000, proventos: 'dentro', preco: 'fechamento', itens });
+const novaCarteiraSim = (nome, itens) => ({ nome, aporte: Number(S.ajustes.aporteMensal) || 2000, dia: 'util1', proventos: 'dentro', preco: 'fechamento', itens, edicoes: {}, extras: [] });
 const simPadrao = () => ({
-  inicio: '2024-05',
+  de: '2024-05-01',
+  ate: '', // vazio = até hoje
   comparar: true,
   carteiras: [
     novaCarteiraSim('Carteira A', [{ tipo: 'bolsa', ticker: 'BBAS3', nome: 'Banco do Brasil ON', classe: 'acao', peso: 50 }, { tipo: 'bolsa', ticker: 'PETR4', nome: 'Petrobras PN', classe: 'acao', peso: 50 }]),
@@ -1729,7 +1806,13 @@ let SIM = (() => {
       c.aporte ??= v.aporte ?? (Number(S.ajustes.aporteMensal) || 2000);
       c.proventos ??= prov;
       c.preco ??= v.preco || 'fechamento';
+      c.dia ??= 'util1';
+      c.edicoes ??= {};
+      c.extras ??= [];
     }
+    if (!v.de) v.de = `${v.inicio || '2024-05'}-01`;
+    v.ate ??= '';
+    delete v.inicio;
     delete v.aporte; delete v.proventos; delete v.preco; delete v.reinvestir;
     return v;
   } catch { return simPadrao(); }
@@ -1790,7 +1873,15 @@ function htmlCarteiraSim(c, ci) {
   return `<section class="bloco sim-carteira sim-${CORES_SIM[ci]}" data-carteira="${ci}">
     <div class="bloco-cab"><h2><i class="sw sim-sw-${CORES_SIM[ci]}"></i>${esc(c.nome)}</h2>
       <small class="sim-soma ${Math.abs(soma - 100) < 0.01 ? '' : 'var-baixa'}" data-soma="${ci}">${Math.abs(soma - 100) < 0.01 ? 'soma 100%' : `soma ${fmtPct0(soma)} — o app divide na proporção`}</small></div>
-    <label class="sim-aporte-c"><span>Aporte por mês</span><span class="sim-aporte-in"><small>R$</small><input class="num" data-aporte="${ci}" inputmode="decimal" value="${Number(c.aporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}" aria-label="Aporte por mês da ${esc(c.nome)}"></span></label>
+    <div class="sim-aporte-c">
+      <label class="sim-aporte-l"><span>Aporte por mês</span><span class="sim-aporte-in"><small>R$</small><input class="num" data-aporte="${ci}" inputmode="decimal" value="${Number(c.aporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}" aria-label="Aporte por mês da ${esc(c.nome)}"></span></label>
+      <label class="sim-aporte-l"><span>No dia</span><select data-dia="${ci}" aria-label="Dia do aporte da ${esc(c.nome)}">${DIAS_APORTE.map(([k, n]) => `<option value="${k}" ${String(c.dia) === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      ${(() => {
+        const n = Object.keys(c.edicoes || {}).length + (c.extras || []).length;
+        return n ? `<p class="sim-editados"><span>✎ ${n} ${n === 1 ? 'lançamento alterado' : 'lançamentos alterados'} à mão</span><button type="button" class="btn peq" data-desfazer="${ci}">Desfazer</button></p>`
+          : '<p class="dica sim-editados-dica">Depois de simular, em <b>Operações → Dia</b>, toque num aporte para mudar a data ou o valor, ou inclua aportes extras.</p>';
+      })()}
+    </div>
     <div class="sim-itens">
       <div class="sim-itens-cab" aria-hidden="true"><span>Onde investir</span><span></span><span>% do aporte</span><span></span></div>
       ${c.itens.map((it, ii) => htmlItemSim(it, ci, ii)).join('')}
@@ -1910,7 +2001,7 @@ function htmlHeroiSim(r, c, i) {
   const modo = r.linhas.some((l) => l.tipo === 'bolsa') ? ` · proventos: ${MODOS_PROV[r.modo][0].toLowerCase()}` : '';
   return `<div class="sim-heroi sim-${CORES_SIM[i]}">
     <div class="sh-cab"><b><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(c.nome)}</b><small>${R(r.aporteMes)}/mês${modo}</small></div>
-    <div class="sh-num"><small>Valor hoje</small><b class="sh-valor num">${R(r.total)}</b>
+    <div class="sh-num"><small>${r.ateHoje ? 'Valor hoje' : `Valor em ${dataBR(r.fim)}`}</small><b class="sh-valor num">${R(r.total)}</b>
       <span class="sh-ganho ${clsV(r.ganho)}">${sinalR(r.ganho)} <small>(${pct(r.ganhoPct)})</small> de ganho</span></div>
     <div class="sh-barra" role="img" aria-label="Do bolso ${R(r.bolso)}, valorização ${R(v)}, proventos ${R(prov)}">${segs}</div>
     <div class="sh-leg">
@@ -1939,7 +2030,7 @@ function htmlResultadoSim() {
   };
   return `
     <section class="bloco sim-res">
-      <div class="bloco-cab"><h2>Resultado</h2><small>${r0.nAportes} aportes · ${dataBR(r0.inicio)} a ${dataBR(r0.fim)}</small></div>
+      <div class="bloco-cab"><h2>Resultado</h2><small>${res.map((r, i) => `${res.length > 1 ? `${cfg.carteiras[i].nome.replace('Carteira ', '')}: ` : ''}${r.nAportes} aportes`).join(' · ')} · ${dataBR(r0.de)} a ${dataBR(r0.fim)}</small></div>
       ${veredito()}
       <div class="sim-herois">${res.map((r, i) => htmlHeroiSim(r, cfg.carteiras[i], i)).join('')}</div>
       <details class="sim-det" ${matchMedia('(min-width: 721px)').matches ? 'open' : ''}>
@@ -1949,7 +2040,7 @@ function htmlResultadoSim() {
           ${linha('Saiu do seu bolso <small>aportes, descontados os proventos usados</small>', (r) => `<span class="num forte">${R(r.bolso)}<small>média de ${R(r.bolso / r.nAportes)} por mês</small></span>`)}
           ${res.some((r) => r.reinvestido > 0.005) ? linha('Proventos reinvestidos <small>entraram nas compras</small>', (r) => `<span class="num">${r.reinvestido > 0.005 ? `+ ${R(r.reinvestido)}` : '—'}</span>`, 'sim-parte') : ''}
           ${res.some((r) => r.reinvestido > 0.005) ? linha('Total investido <small>bolso + proventos reinvestidos</small>', (r) => `<span class="num">${R(r.investido)}</span>`) : ''}
-          ${linha('Valor hoje', (r) => `<span class="num forte">${R(r.total)}${r.provFora > 0.005 ? `<small>com ${R(r.provFora)} de proventos guardados</small>` : ''}${r.provPend > 0.005 ? `<small>com ${R(r.provPend)} de proventos para o próximo aporte</small>` : ''}${r.caixa > 0.5 ? `<small>com ${R(r.caixa)} de sobra em caixa</small>` : ''}</span>`)}
+          ${linha(r0.ateHoje ? 'Valor hoje' : `Valor em ${dataBR(r0.fim)}`, (r) => `<span class="num forte">${R(r.total)}${r.provFora > 0.005 ? `<small>com ${R(r.provFora)} de proventos guardados</small>` : ''}${r.provPend > 0.005 ? `<small>com ${R(r.provPend)} de proventos para o próximo aporte</small>` : ''}${r.caixa > 0.5 ? `<small>com ${R(r.caixa)} de sobra em caixa</small>` : ''}</span>`)}
           ${temBolsa ? linha('Valorização das cotas <small>preço de hoje − preço pago, com as taxas</small>', (r) => (r.linhas.some((l) => l.tipo === 'bolsa') ? `<span class="num ${clsV(r.valorizacaoBolsa)}">${sinalR(r.valorizacaoBolsa)} <small>${pct(r.bolso ? r.valorizacaoBolsa / r.bolso : null)}</small></span>` : '<span class="num">—</span>'), 'sim-parte') : ''}
           ${temRF ? linha('Rendimento da renda fixa <small>juros do Tesouro, CDB ou LCI</small>', (r) => (r.linhas.some((l) => l.tipo !== 'bolsa') ? `<span class="num ${clsV(r.rendimentoRF)}">${sinalR(r.rendimentoRF)} <small>${pct(r.bolso ? r.rendimentoRF / r.bolso : null)}</small></span>` : '<span class="num">—</span>'), 'sim-parte') : ''}
           ${temBolsa ? linha('Proventos recebidos <small>já líquidos, caídos na conta</small>', (r) => `<span class="num ${r.proventos ? 'var-alta' : ''}">${r.proventos ? `+ ${R(r.proventos)} <small>${pct(r.bolso ? r.proventos / r.bolso : null)}</small>` : '—'}</span>`, 'sim-parte') : ''}
@@ -2245,12 +2336,23 @@ const FILTROS_DIA = [['tudo', 'Tudo'], ['compra', 'Compras'], ['provento', 'Prov
 function htmlCardSim(o, modoPreco) {
   if (o.tipo === 'aporte') {
     const partes = [`${R(o.bolso)} do bolso`, o.reinvestido > 0.005 ? `${R(o.reinvestido)} de proventos` : '', o.sobra > 0.005 ? `${R(o.sobra)} de sobra do mês anterior` : ''].filter(Boolean);
-    return `<div class="card-compra sim-card-aporte">
+    const regra = DIAS_APORTE.find(([k]) => k === String(SIM_RES?.cfg.carteiras[SIM_VISTA.cart]?.dia || 'util1'))?.[1] || '';
+    return `<div class="card-compra sim-card-aporte" role="button" tabindex="0" data-edit-aporte="${esc(o.chave)}" aria-label="Editar aporte de ${dataBR(o.data)}">
       <span class="logo-ativo sim-logo-aporte" aria-hidden="true"><span>+</span></span>
       <div class="cc-info">
-        <div class="cc-linha"><b class="cc-ticker">Aporte do mês</b><span class="cc-total num">${R(o.total)}</span></div>
+        <div class="cc-linha"><b class="cc-ticker">${o.extra ? 'Aporte extra' : 'Aporte do mês'}${o.editado ? ' <span class="cc-op">editado</span>' : ''}</b><span class="cc-total num">${R(o.total)}</span></div>
         <div class="cc-linha cc-sub"><span>${partes.join(' + ')}</span></div>
-        <div class="cc-linha cc-rodape"><small>${dataBR(o.data)} · 1º dia útil do mês</small></div>
+        <div class="cc-linha cc-rodape"><small>${dataBR(o.data)}${o.extra || o.editado ? '' : ` · ${regra.toLowerCase()}`}</small>
+          <span class="cc-acoes"><button type="button" class="ic-btn" data-edit-aporte="${esc(o.chave)}" title="Editar" aria-label="Editar aporte">${ICONE_EDITAR}</button></span></div>
+      </div></div>`;
+  }
+  if (o.tipo === 'removido') {
+    return `<div class="card-compra sim-card-removido">
+      <span class="logo-ativo" aria-hidden="true"><span>−</span></span>
+      <div class="cc-info">
+        <div class="cc-linha"><b class="cc-ticker">Aporte tirado</b><span class="cc-total num">${R(o.valor)}</span></div>
+        <div class="cc-linha cc-rodape"><small>era em ${dataBR(o.data)} · não entrou na simulação</small>
+          <span class="cc-acoes"><button type="button" class="btn peq" data-voltar-aporte="${esc(o.chave)}">Voltar</button></span></div>
       </div></div>`;
   }
   if (o.tipo === 'compra') {
@@ -2284,13 +2386,15 @@ function htmlCardSim(o, modoPreco) {
 
 function htmlDiaSim(r) {
   const f = SIM_VISTA.filtro || 'tudo';
-  const ops = r.ops.map((o, i) => ({ ...o, i }))
-    .filter((o) => f === 'tudo' || (f === 'compra' ? ['compra', 'aplicacao', 'aporte'].includes(o.tipo) : o.tipo === 'provento'))
+  const ops = [...r.ops, ...(r.removidos || []).map((x) => ({ tipo: 'removido', ...x }))].map((o, i) => ({ ...o, i }))
+    .filter((o) => f === 'tudo' || (f === 'compra' ? ['compra', 'aplicacao', 'aporte', 'removido'].includes(o.tipo) : o.tipo === 'provento'))
     .sort((a, b) => b.data.localeCompare(a.data) || a.i - b.i);
   const porMes = groupBy(ops, (o) => mesDe(o.data));
   const pm = new Map(r.porMes.map((m) => [m.mes, m]));
   return `
-    <div class="sim-filtro-dia"><div class="seg" role="group" aria-label="Mostrar">${FILTROS_DIA.map(([k, n]) => `<button type="button" data-sim-filtro="${k}" aria-pressed="${f === k}">${n}</button>`).join('')}</div></div>
+    <div class="sim-filtro-dia"><div class="seg" role="group" aria-label="Mostrar">${FILTROS_DIA.map(([k, n]) => `<button type="button" data-sim-filtro="${k}" aria-pressed="${f === k}">${n}</button>`).join('')}</div>
+      <button type="button" class="btn peq" data-novo-aporte>+ Aporte extra</button></div>
+    <p class="dica">Toque num aporte para mudar a data ou o valor, ou para tirá-lo. A simulação é refeita na hora, com as compras e os proventos desde a nova data.</p>
     ${r.aReceber.length && f !== 'compra' ? `<details class="mes-grupo" open><summary class="mes-cab"><span>A receber</span><span class="num">${R(r.aReceberTotal)}</span></summary><div class="compras-lista">${r.aReceber.map((x) => htmlCardSim({ tipo: 'provento', data: x.pagamento, ticker: x.ticker, ptipo: x.tipo, ex: x.ex, com: x.com, cotas: x.cotas, porCota: x.porCota, bruto: x.bruto, ir: x.ir, valor: x.valor }, r.modoPreco).replace('pago em', 'paga em')).join('')}</div></details>` : ''}
     ${[...porMes.entries()].map(([mes, xs], i) => {
       const m = pm.get(mes);
@@ -2357,7 +2461,8 @@ function renderSimular() {
     <section class="bloco sim-config">
       <div class="bloco-cab"><h2>Simular aportes</h2><small>e se eu tivesse investido todo mês desde…</small></div>
       <div class="sim-config-linha">
-        <label class="campo"><span>Desde</span><input type="month" id="sim-inicio" value="${esc(SIM.inicio)}" min="2015-01" max="${mesDe(hojeISO())}"><span class="sub">um aporte no 1º dia útil de cada mês, até hoje</span></label>
+        <label class="campo"><span>De</span><input type="date" id="sim-de" value="${esc(SIM.de)}" min="2015-01-01" max="${hojeISO()}"><span class="sub">primeiro dia da simulação</span></label>
+        <label class="campo"><span>Até</span><input type="date" id="sim-ate" value="${esc(SIM.ate || hojeISO())}" min="2015-01-01" max="${hojeISO()}"><span class="sub">${SIM.ate && SIM.ate < hojeISO() ? '<button type="button" id="sim-ate-hoje">voltar para hoje</button>' : 'último dia: hoje'}</span></label>
         <div class="campo"><span>Simular</span>
           <div class="seg" role="group" aria-label="Quantas carteiras">${[[false, 'Uma carteira'], [true, 'Comparar duas']].map(([k, n]) => `<button type="button" data-comparar="${k}" aria-pressed="${Boolean(SIM.comparar) === k}">${n}</button>`).join('')}</div>
           <span class="sub">${SIM.comparar ? 'monte as duas e veja qual teria rendido mais' : 'só a Carteira A'}</span></div>
@@ -2374,7 +2479,7 @@ function renderSimular() {
     <div id="sim-saida">${htmlResultadoSim()}</div>`;
 }
 
-async function rodarSimulacao() {
+async function rodarSimulacao({ rolar = true } = {}) {
   const cfg = JSON.parse(JSON.stringify(SIM));
   cfg.carteiras = cfg.comparar ? cfg.carteiras : cfg.carteiras.slice(0, 1);
   for (const c of cfg.carteiras) {
@@ -2391,11 +2496,12 @@ async function rodarSimulacao() {
     if (!c.itens.length) { toast(`${c.nome}: coloque um percentual em pelo menos um investimento.`); return; }
     if (!(Number(c.aporte) > 0)) { toast(`${c.nome}: informe o aporte por mês.`); return; }
   }
-  if (!/^\d{4}-\d{2}$/.test(cfg.inicio) || cfg.inicio > mesDe(hojeISO())) { toast('Escolha o mês de início.'); return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cfg.de) || cfg.de > hojeISO()) { toast('Escolha a data de início.'); return; }
+  if (cfg.ate && cfg.ate < cfg.de) { toast('O fim do período vem antes do início.'); return; }
 
   simulando = true; render();
   try {
-    const de = `${cfg.inicio}-01`;
+    const de = cfg.de;
     const todos = cfg.carteiras.flatMap((c) => c.itens);
     const tickers = [...new Set(todos.filter((it) => it.tipo === 'bolsa').map((it) => it.ticker))];
     const series = seriesNecessarias(todos);
@@ -2404,7 +2510,7 @@ async function rodarSimulacao() {
       Promise.all(series.map((s) => apiSim(`sim/indice?s=${s}&de=${de}`).catch((e) => { throw new Error(`taxa ${s.toUpperCase()}: ${e.message}`); }))),
     ]);
     const dados = { precos: Object.fromEntries(precos.map((p) => [p.ticker, p])), indices: Object.fromEntries(indices.map((x) => [x.serie, x.dados])) };
-    SIM_RES = { cfg, res: cfg.carteiras.map((c) => simular({ inicio: cfg.inicio, aporte: Number(c.aporte), proventos: c.proventos, preco: c.preco, itens: c.itens }, dados)) };
+    SIM_RES = { cfg, res: cfg.carteiras.map((c) => simular({ de: cfg.de, ate: cfg.ate || null, dia: c.dia, edicoes: c.edicoes, extras: c.extras, aporte: Number(c.aporte), proventos: c.proventos, preco: c.preco, itens: c.itens }, dados)) };
     SIM_G.sel = null;
     if (SIM_RES.res.length < 2 && SIM_G.cart === 'comp') SIM_G.cart = 0;
     SIM_VISTA.cart = Math.min(SIM_VISTA.cart, SIM_RES.res.length - 1);
@@ -2412,8 +2518,66 @@ async function rodarSimulacao() {
     toast(`Não deu para simular: ${e.message}`);
   } finally {
     simulando = false;
-    if (location.hash === '#simular') { render(); $('#sim-saida')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    if (location.hash === '#simular') {
+      const y = scrollY;
+      render();
+      if (rolar) $('#sim-saida')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); else scrollTo({ top: y });
+    }
   }
+}
+
+/** Muda a data ou o valor de um aporte da simulação (ou cria um extra), guardando a alteração na carteira. */
+function abrirEditarAporteSim(chave) {
+  if (!SIM_RES) return;
+  const ci = Math.min(SIM_VISTA.cart, SIM_RES.res.length - 1);
+  const c = SIM.carteiras[ci];
+  const r = SIM_RES.res[ci];
+  const novo = chave == null;
+  const extraId = chave?.startsWith('x:') ? chave.slice(2) : null;
+  const ap = novo ? null : r.agenda.find((a) => a.chave === chave);
+  const ini = r.de, fim = r.fim;
+  const data = ap?.data || fim;
+  const valor = ap?.valor ?? Number(c.aporte);
+  const dlg = $('#dlg-compra');
+  dlg.innerHTML = `
+    <form method="dialog" class="form-edit">
+      <h2>${novo ? 'Aporte extra' : extraId ? 'Editar aporte extra' : 'Editar aporte'} <small class="dica">· ${esc(c.nome)}</small></h2>
+      <p class="dica">${novo ? 'Um aporte a mais, além dos mensais. Ele é dividido entre os investimentos pelos mesmos percentuais.' : 'Mude a data ou o valor. Se a data não tiver pregão, o aporte vai para o próximo dia útil.'}</p>
+      <div class="campos dois">
+        <label class="campo"><span>Data</span><input type="date" id="ea-data" value="${esc(data)}" min="${esc(ini)}" max="${esc(fim)}" required><span class="sub">entre ${dataBR(ini)} e ${dataBR(fim)}</span></label>
+        <label class="campo"><span>Valor do aporte (R$)</span><input id="ea-valor" class="num" inputmode="decimal" value="${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}" required><span class="sub">${c.proventos === 'dentro' ? 'os proventos recebidos pagam parte' : 'sai do bolso'}</span></label>
+      </div>
+      <p class="dica erro-campo" id="ea-erro" hidden></p>
+      <div class="acoes">
+        ${!novo ? `<button class="btn perigo" value="tirar" formnovalidate>${extraId ? 'Apagar' : 'Tirar este aporte'}</button>` : ''}
+        ${ap?.editado && !extraId ? '<button class="btn" value="restaurar" formnovalidate>Como era</button>' : ''}
+        <span class="esp"></span><button class="btn" value="cancelar" formnovalidate>Cancelar</button><button class="btn prim" value="ok">${novo ? 'Incluir' : 'Salvar'}</button>
+      </div>
+    </form>`;
+  dlg.oninput = null; dlg.onchange = null;
+  $('form', dlg).addEventListener('submit', (e) => {
+    if (e.submitter?.value !== 'ok') return;
+    const v = num($('#ea-valor').value), d = $('#ea-data').value;
+    const erro = !(v >= 0) ? 'Informe o valor.' : !d ? 'Escolha a data.' : d < ini || d > fim ? `Escolha uma data entre ${dataBR(ini)} e ${dataBR(fim)}.` : '';
+    if (erro) { e.preventDefault(); const er = $('#ea-erro'); er.textContent = erro; er.hidden = false; }
+  });
+  dlg.onclose = () => {
+    const acao = dlg.returnValue;
+    if (!['ok', 'tirar', 'restaurar'].includes(acao)) return;
+    c.edicoes ||= {}; c.extras ||= [];
+    if (acao === 'ok') {
+      const d = $('#ea-data').value, v = round2(num($('#ea-valor').value));
+      if (novo) c.extras.push({ id: uid(), data: d, valor: v });
+      else if (extraId) Object.assign(c.extras.find((x) => x.id === extraId) || {}, { data: d, valor: v });
+      else c.edicoes[chave] = { data: d, valor: v };
+    } else if (acao === 'tirar') {
+      if (extraId) c.extras = c.extras.filter((x) => x.id !== extraId);
+      else c.edicoes[chave] = { fora: true };
+    } else if (acao === 'restaurar') delete c.edicoes[chave];
+    salvarSim();
+    rodarSimulacao({ rolar: false });
+  };
+  dlg.showModal();
 }
 
 function desenharGraficosSim({ fim = true } = {}) {
@@ -2444,7 +2608,8 @@ function ligarSimular() {
   raiz.addEventListener('input', (e) => {
     const t = e.target;
     if (t.dataset.aporte != null) { SIM.carteiras[t.dataset.aporte].aporte = num(t.value) || 0; salvarSim(); return; }
-    if (t.id === 'sim-inicio') { if (t.value) { SIM.inicio = t.value; salvarSim(); } return; }
+    if (t.id === 'sim-de') { if (t.value) { SIM.de = t.value; salvarSim(); } return; }
+    if (t.id === 'sim-ate') { if (t.value) { SIM.ate = t.value >= hojeISO() ? '' : t.value; salvarSim(); } return; }
     const row = t.closest('.sim-item');
     if (!row || t.dataset.campo === 'tipo') return;
     const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
@@ -2454,6 +2619,7 @@ function ligarSimular() {
   });
   raiz.addEventListener('change', (e) => {
     const t = e.target;
+    if (t.dataset.dia != null) { SIM.carteiras[t.dataset.dia].dia = t.value; salvarSim(); return; }
     if (t.dataset.campo !== 'tipo') return;
     const row = t.closest('.sim-item');
     const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
@@ -2463,6 +2629,8 @@ function ligarSimular() {
     salvarSim(); redesenharCarteira(row.dataset.c);
   });
   raiz.addEventListener('click', (e) => {
+    const cardAp = e.target.closest('[data-edit-aporte]');
+    if (cardAp) { abrirEditarAporteSim(cardAp.dataset.editAporte); return; }
     const slot = e.target.closest('[data-g-slot]');
     if (slot) { SIM_G.sel = Number(slot.dataset.gSlot); desenharBarrasSim(); return; }
     const t = e.target.closest('button');
@@ -2473,6 +2641,10 @@ function ligarSimular() {
       abrirEscolherAtivo((a) => { it.ticker = a.ticker; it.nome = a.nome; it.classe = a.classe; salvarSim(); redesenharCarteira(row.dataset.c); });
       return;
     }
+    if (t.hasAttribute('data-novo-aporte')) { abrirEditarAporteSim(null); return; }
+    if (t.dataset.voltarAporte) { const c = SIM.carteiras[Math.min(SIM_VISTA.cart, SIM_RES.res.length - 1)]; delete c.edicoes[t.dataset.voltarAporte]; salvarSim(); rodarSimulacao({ rolar: false }); return; }
+    if (t.dataset.desfazer != null) { const c = SIM.carteiras[t.dataset.desfazer]; c.edicoes = {}; c.extras = []; salvarSim(); redesenharCarteira(t.dataset.desfazer); if (SIM_RES) rodarSimulacao({ rolar: false }); return; }
+    if (t.id === 'sim-ate-hoje') { SIM.ate = ''; salvarSim(); render(); return; }
     if (t.dataset.modoProv) { SIM.carteiras[t.dataset.c].proventos = t.dataset.modoProv; salvarSim(); redesenharCarteira(t.dataset.c); return; }
     if (t.dataset.preco) { SIM.carteiras[t.dataset.c].preco = t.dataset.preco; salvarSim(); redesenharCarteira(t.dataset.c); return; }
     if (t.dataset.comparar) { SIM.comparar = t.dataset.comparar === 'true'; salvarSim(); render(); return; }

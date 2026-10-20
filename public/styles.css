@@ -1088,3 +1088,38 @@ table.resp .rv { display: block; }
   .sim-tab td, .sim-tab th { white-space: normal; }
 }
 @media (max-width: 640px) { table.resp td:first-child .rv, table.resp td.resp-tit .rv { text-align: left; } }
+
+/* ---------- dividir em % (Comprar) ---------- */
+.o-pc { color: var(--tinta-3); white-space: nowrap; }
+.dividir-form { max-height: calc(100dvh - 40px); overflow: auto; }
+.dv-valor { grid-template-rows: auto 42px auto; }
+.dv-atalhos { display: flex; gap: 8px; flex-wrap: wrap; }
+.dv-lista { display: grid; gap: 4px; }
+.dv-item { display: grid; grid-template-columns: 32px minmax(0, 1fr) 92px minmax(96px, auto); gap: 10px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--linha); }
+.dv-item .logo-ativo { width: 32px; height: 32px; border-radius: 9px; font-size: 0.7rem; cursor: default; }
+.dv-nome { display: grid; min-width: 0; }
+.dv-nome b { font: 700 0.92rem var(--f-display); }
+.dv-nome small { font-size: 0.76rem; color: var(--tinta-3); }
+.dv-pc { display: flex; align-items: center; gap: 4px; }
+.dv-pc input { width: 100%; text-align: right; height: 38px; }
+.dv-pc small { color: var(--tinta-3); }
+.dv-res { display: grid; text-align: right; font-size: 0.86rem; }
+.dv-res small { font-size: 0.72rem; color: var(--tinta-3); }
+.dv-rodape { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 0.86rem; color: var(--tinta-2); padding: 4px 0; }
+.dv-falta { color: var(--alerta); }
+@media (max-width: 480px) { .dv-item { grid-template-columns: 32px minmax(0, 1fr) 80px; } .dv-res { grid-column: 2 / -1; text-align: left; grid-template-columns: auto auto; justify-content: start; gap: 8px; } }
+
+/* ---------- simulador v1.11: período, dia do aporte e lançamentos editados ---------- */
+.sim-aporte-c { display: grid; gap: 8px; }
+.sim-aporte-l { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sim-aporte-l > span:first-child { font-weight: 600; font-size: 0.9rem; }
+.sim-aporte-l select { width: 170px; height: 40px; }
+.sim-editados { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.84rem; color: var(--alerta); margin: 0; }
+.sim-editados-dica { margin: 0; font-size: 0.78rem; }
+.sim-filtro-dia { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sim-card-aporte { cursor: pointer; }
+.sim-card-aporte:hover { outline: 1px solid var(--violeta); }
+.sim-card-removido { opacity: 0.6; border-style: dashed; }
+.sim-card-removido .logo-ativo { background: var(--folha-2); color: var(--tinta-3); }
+.sim-aporte-l > span:first-child { white-space: nowrap; }
+.sim-aporte-l select, .sim-aporte-l .sel-btn { width: min(190px, 60vw); }

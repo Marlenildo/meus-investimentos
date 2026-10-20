@@ -7,13 +7,13 @@ import { lerMovimentacao, novidades, bancoDaInstituicao } from './b3.js';
 import { carregar, salvar, exportar, importar, resetar, uid, BANCOS_PADRAO, paraNuvem, juntarComNuvem } from './store.js';
 import { atualizarTodas, buscarCotacao } from './cotacoes.js';
 import * as N from './nuvem.js';
-import { simular, TIPOS_SIM, seriesNecessarias, resumoPorPeriodoSim, PRECOS_COMPRA, TIPOS_PROV_SIM, DIAS_APORTE } from './simulador.js';
+import { simular, TIPOS_SIM, seriesNecessarias, resumoPorPeriodoSim, PRECOS_COMPRA, TIPOS_PROV_SIM, DIAS_APORTE, rotuloItem } from './simulador.js';
 import { CATALOGO, NOME_CLASSE_CAT, buscarNoCatalogo } from './catalogo.js';
 import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.11.0';
+export const VERSAO = '1.11.1';
 const VERSAO_DATA = '2026-10-19';
 
 let S = carregar();
@@ -1825,6 +1825,7 @@ const MODOS_PROV = {
 const salvarSim = () => { try { localStorage.setItem(SIM_KEY, JSON.stringify(SIM)); } catch { /* sem armazenamento */ } };
 let SIM_RES = null; // { cfg, res: [resultado A, resultado B?] }
 let simulando = false;
+let SIM_RENOMEAR = null; // qual carteira está com o campo de nome aberto
 let SIM_VISTA = { per: 'ano', cart: 0, filtro: 'tudo' }; // por período: 'dia' | 'mes' | 'ano' | 'tudo', qual carteira e o filtro da lista do dia
 let SIM_G = { modo: 'acumulado', per: 'mes', cart: 0, sel: null }; // gráfico: carteira (ou 'comp'), período, modo e barra escolhida
 const cacheSim = new Map();
@@ -1842,6 +1843,22 @@ async function apiSim(caminho) {
   return p;
 }
 
+const LETRAS_SIM = ['A', 'B'];
+/** Nome da carteira: o que você deu, ou o que tem dentro ("BBAS3 + PETR4", "Tesouro Selic"). */
+function nomeCart(c, i = SIM.carteiras.indexOf(c)) {
+  if (c.apelido?.trim()) return c.apelido.trim();
+  const com = c.itens.filter((it) => (Number(it.peso) || 0) > 0 && (it.tipo !== 'bolsa' || it.ticker));
+  const nomes = (com.length ? com : c.itens).map((it) => (it.tipo === 'bolsa' ? it.ticker : rotuloItem(it))).filter(Boolean);
+  if (!nomes.length) return `Carteira ${LETRAS_SIM[i] || ''}`.trim();
+  return nomes.length <= 3 ? nomes.join(' + ') : `${nomes.slice(0, 2).join(' + ')} + ${nomes.length - 2} outros`;
+}
+/** Composição com as %: "BBAS3 50% · PETR4 50%". */
+function composicaoCart(c) {
+  const soma = pesoSoma(c) || 1;
+  return c.itens.filter((it) => (Number(it.peso) || 0) > 0).map((it) => `${it.tipo === 'bolsa' ? it.ticker : rotuloItem(it)} ${fmtPct0((Number(it.peso) / soma) * 100)}`).join(' · ');
+}
+/** Etiqueta da carteira: a letra na cor dela + o nome. curto = o nome corta com reticências. */
+const tagCart = (i, nome, curto = false) => `<span class="sim-tag sim-tag-${CORES_SIM[i]} ${curto ? 'curto' : ''}" title="${esc(nome)}"><i>${LETRAS_SIM[i]}</i><span>${esc(nome)}</span></span>`;
 const pesoSoma = (c) => c.itens.reduce((s, it) => s + (Number(it.peso) || 0), 0);
 const fmtPct0 = (v) => `${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
 const temBolsaSim = (c) => c.itens.some((it) => it.tipo === 'bolsa');
@@ -1871,11 +1888,12 @@ function htmlCarteiraSim(c, ci) {
   const soma = pesoSoma(c);
   const bolsa = temBolsaSim(c);
   return `<section class="bloco sim-carteira sim-${CORES_SIM[ci]}" data-carteira="${ci}">
-    <div class="bloco-cab"><h2><i class="sw sim-sw-${CORES_SIM[ci]}"></i>${esc(c.nome)}</h2>
+    <div class="bloco-cab"><h2 class="sim-cart-tit" data-titulo="${ci}">${tagCart(ci, nomeCart(c, ci))}<button type="button" class="ic-btn" data-renomear="${ci}" title="Dar um nome" aria-label="Dar um nome à carteira ${LETRAS_SIM[ci]}">${ICONE_EDITAR}</button></h2>
       <small class="sim-soma ${Math.abs(soma - 100) < 0.01 ? '' : 'var-baixa'}" data-soma="${ci}">${Math.abs(soma - 100) < 0.01 ? 'soma 100%' : `soma ${fmtPct0(soma)} — o app divide na proporção`}</small></div>
+    ${SIM_RENOMEAR === ci ? `<label class="sim-renomear"><span>Nome da carteira ${LETRAS_SIM[ci]}</span><input data-apelido="${ci}" value="${esc(c.apelido || '')}" placeholder="${esc(nomeCart({ ...c, apelido: '' }, ci))}" maxlength="40" autocomplete="off"><small class="dica">vazio = o nome dos investimentos</small></label>` : ''}
     <div class="sim-aporte-c">
-      <label class="sim-aporte-l"><span>Aporte por mês</span><span class="sim-aporte-in"><small>R$</small><input class="num" data-aporte="${ci}" inputmode="decimal" value="${Number(c.aporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}" aria-label="Aporte por mês da ${esc(c.nome)}"></span></label>
-      <label class="sim-aporte-l"><span>No dia</span><select data-dia="${ci}" aria-label="Dia do aporte da ${esc(c.nome)}">${DIAS_APORTE.map(([k, n]) => `<option value="${k}" ${String(c.dia) === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <label class="sim-aporte-l"><span>Aporte por mês</span><span class="sim-aporte-in"><small>R$</small><input class="num" data-aporte="${ci}" inputmode="decimal" value="${Number(c.aporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}" aria-label="Aporte por mês de ${esc(nomeCart(c, ci))}"></span></label>
+      <label class="sim-aporte-l"><span>No dia</span><select data-dia="${ci}" aria-label="Dia do aporte de ${esc(nomeCart(c, ci))}">${DIAS_APORTE.map(([k, n]) => `<option value="${k}" ${String(c.dia) === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       ${(() => {
         const n = Object.keys(c.edicoes || {}).length + (c.extras || []).length;
         return n ? `<p class="sim-editados"><span>✎ ${n} ${n === 1 ? 'lançamento alterado' : 'lançamentos alterados'} à mão</span><button type="button" class="btn peq" data-desfazer="${ci}">Desfazer</button></p>`
@@ -2000,7 +2018,8 @@ function htmlHeroiSim(r, c, i) {
     : `<i class="sh-bolso" style="width:${w(r.bolso + v)}"></i><i class="sh-perda" style="width:${w(-v)}"></i><i class="sh-prov" style="width:${w(prov)}"></i>`;
   const modo = r.linhas.some((l) => l.tipo === 'bolsa') ? ` · proventos: ${MODOS_PROV[r.modo][0].toLowerCase()}` : '';
   return `<div class="sim-heroi sim-${CORES_SIM[i]}">
-    <div class="sh-cab"><b><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(c.nome)}</b><small>${R(r.aporteMes)}/mês${modo}</small></div>
+    <div class="sh-cab"><b>${tagCart(i, c.nome)}</b></div>
+    <small class="sh-comp">${esc(c.comp || '')} · ${R(r.aporteMes)}/mês${modo}</small>
     <div class="sh-num"><small>${r.ateHoje ? 'Valor hoje' : `Valor em ${dataBR(r.fim)}`}</small><b class="sh-valor num">${R(r.total)}</b>
       <span class="sh-ganho ${clsV(r.ganho)}">${sinalR(r.ganho)} <small>(${pct(r.ganhoPct)})</small> de ganho</span></div>
     <div class="sh-barra" role="img" aria-label="Do bolso ${R(r.bolso)}, valorização ${R(v)}, proventos ${R(prov)}">${segs}</div>
@@ -2026,17 +2045,17 @@ function htmlResultadoSim() {
     if (melhor == null) return '';
     const a = res[melhor], b = res[1 - melhor];
     const difBolso = b.bolso - a.bolso;
-    return `<p class="sim-veredito"><i class="sw sim-sw-${CORES_SIM[melhor]}"></i><span><b>${esc(cfg.carteiras[melhor].nome)}</b> teria ganho <b>${R(a.ganho - b.ganho)} a mais</b>${Math.abs(difBolso) > 1 ? `, ${difBolso > 0 ? `saindo ${R(difBolso)} a menos` : `mesmo saindo ${R(-difBolso)} a mais`} do seu bolso` : ''}.</span></p>`;
+    return `<p class="sim-veredito"><span>${tagCart(melhor, cfg.carteiras[melhor].nome)} teria ganho <b>${R(a.ganho - b.ganho)} a mais</b>${Math.abs(difBolso) > 1 ? `, ${difBolso > 0 ? `saindo ${R(difBolso)} a menos` : `mesmo saindo ${R(-difBolso)} a mais`} do seu bolso` : ''}.</span></p>`;
   };
   return `
     <section class="bloco sim-res">
-      <div class="bloco-cab"><h2>Resultado</h2><small>${res.map((r, i) => `${res.length > 1 ? `${cfg.carteiras[i].nome.replace('Carteira ', '')}: ` : ''}${r.nAportes} aportes`).join(' · ')} · ${dataBR(r0.de)} a ${dataBR(r0.fim)}</small></div>
+      <div class="bloco-cab"><h2>Resultado</h2><small>${res.map((r, i) => `${res.length > 1 ? `${LETRAS_SIM[i]}: ` : ''}${r.nAportes} aportes`).join(' · ')} · ${dataBR(r0.de)} a ${dataBR(r0.fim)}</small></div>
       ${veredito()}
       <div class="sim-herois">${res.map((r, i) => htmlHeroiSim(r, cfg.carteiras[i], i)).join('')}</div>
       <details class="sim-det" ${matchMedia('(min-width: 721px)').matches ? 'open' : ''}>
         <summary>Todos os números</summary>
         <div class="sim-comp" style="--cols:${res.length}">
-          ${res.length > 1 ? `<div class="sim-comp-cab"><span></span>${res.map((r, i) => `<b><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)}</b>`).join('')}</div>` : ''}
+          ${res.length > 1 ? `<div class="sim-comp-cab"><span></span>${res.map((r, i) => `<b>${tagCart(i, cfg.carteiras[i].nome)}</b>`).join('')}</div>` : ''}
           ${linha('Saiu do seu bolso <small>aportes, descontados os proventos usados</small>', (r) => `<span class="num forte">${R(r.bolso)}<small>média de ${R(r.bolso / r.nAportes)} por mês</small></span>`)}
           ${res.some((r) => r.reinvestido > 0.005) ? linha('Proventos reinvestidos <small>entraram nas compras</small>', (r) => `<span class="num">${r.reinvestido > 0.005 ? `+ ${R(r.reinvestido)}` : '—'}</span>`, 'sim-parte') : ''}
           ${res.some((r) => r.reinvestido > 0.005) ? linha('Total investido <small>bolso + proventos reinvestidos</small>', (r) => `<span class="num">${R(r.investido)}</span>`) : ''}
@@ -2057,7 +2076,7 @@ function htmlResultadoSim() {
     ${htmlPeriodosSim()}
 
     ${res.map((r, i) => resp(`<section class="bloco">
-      <div class="bloco-cab"><h2 class="sim-h"><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)} · por investimento</h2></div>
+      <div class="bloco-cab"><h2 class="sim-h">${tagCart(i, cfg.carteiras[i].nome)} · por investimento</h2></div>
       <table class="resp">
         <thead><tr><th>Investimento</th><th class="r">Aplicado</th><th class="r">Cotas</th><th class="r">Valor hoje</th><th class="r">Valorização</th><th class="r">Proventos</th><th class="r">Resultado</th></tr></thead>
         <tbody>${r.linhas.map((l) => `<tr>
@@ -2100,20 +2119,20 @@ function htmlGraficoBarrasSim() {
   const comp = res.length > 1 && SIM_G.cart === 'comp';
   const ci = comp ? 0 : Math.min(Number(SIM_G.cart) || 0, res.length - 1);
   const controles = `<div class="graf-controles">
-    ${res.length > 1 ? `<div class="seg" role="group" aria-label="Carteira">${res.map((x, i) => `<button type="button" data-g-cart="${i}" aria-pressed="${!comp && i === ci}"><i class="sw sim-sw-${CORES_SIM[i]}"></i> ${esc(cfg.carteiras[i].nome.replace('Carteira ', ''))}</button>`).join('')}<button type="button" data-g-cart="comp" aria-pressed="${comp}">A × B</button></div>` : ''}
+    ${res.length > 1 ? `<div class="seg sim-seg-cart" role="group" aria-label="Carteira">${res.map((x, i) => `<button type="button" data-g-cart="${i}" aria-pressed="${!comp && i === ci}">${tagCart(i, cfg.carteiras[i].nome, true)}</button>`).join('')}<button type="button" data-g-cart="comp" aria-pressed="${comp}"><span class="sim-tag"><i class="sim-ab">A×B</i><span>Comparar</span></span></button></div>` : ''}
     ${comp ? '' : `<div class="seg" role="group" aria-label="Mostrar">${[['periodo', 'No período'], ['acumulado', 'Acumulado']].map(([k, n]) => `<button type="button" data-g-modo="${k}" aria-pressed="${SIM_G.modo === k}">${n}</button>`).join('')}</div>
     <div class="seg" role="group" aria-label="Agrupar por">${[['mes', 'Mês'], ['ano', 'Ano']].map(([k, n]) => `<button type="button" data-g-per="${k}" aria-pressed="${SIM_G.per === k}">${n}</button>`).join('')}</div>`}
   </div>`;
   if (comp) {
     return `<section class="bloco grafico-bloco sim-grafico">
       <div class="graf-topo"><div><h2>Evolução das duas carteiras</h2><small class="sub-cab">valor de cada uma e o que saiu do bolso, mês a mês</small></div>${controles}</div>
-      <div class="sim-legenda">${res.map((r, i) => `<span><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)}</span>`).join('')}<span><i class="sw sim-sw-inv"></i>Saiu do bolso</span></div>
+      <div class="sim-legenda">${res.map((r, i) => `<span>${tagCart(i, cfg.carteiras[i].nome)}</span>`).join('')}<span><i class="sw sim-sw-inv"></i>Saiu do bolso</span></div>
       <div class="sim-graf" id="sim-graf"></div>
     </section>`;
   }
   const acum = SIM_G.modo === 'acumulado';
   return `<section class="bloco grafico-bloco sim-grafico">
-    <div class="graf-topo"><div><h2>${acum ? 'Total acumulado' : 'Quanto investiu'}${res.length > 1 ? ` <span class="graf-ativo-nome">· ${esc(cfg.carteiras[ci].nome)}</span>` : ''}</h2>
+    <div class="graf-topo"><div><h2>${acum ? 'Total acumulado' : 'Quanto investiu'}${res.length > 1 ? ` ${tagCart(ci, cfg.carteiras[ci].nome, true)}` : ''}</h2>
       <small class="sub-cab">${acum ? 'investido por tipo, com a valorização por cima; proventos na barrinha ao lado' : 'quanto entrou em cada tipo no período; proventos recebidos na barrinha ao lado'}</small></div>${controles}</div>
     <div class="graf-rolagem" id="sim-barras"></div>
     <div class="graf-legenda" id="sim-barras-leg"></div>
@@ -2244,7 +2263,7 @@ function desenharBarrasSim({ fim = false } = {}) {
     const valoriz = posicao - invS;
     const ganho = g.valorFim - g.acum.bolso;
     $('#sim-barras-det').innerHTML = `<div class="conta">
-      <div class="conta-cab"><b>Até ${nomePer}</b><span class="apagado">${esc(cfg.carteiras[ci].nome)}</span></div>
+      <div class="conta-cab"><b>Até ${nomePer}</b>${tagCart(ci, cfg.carteiras[ci].nome, true)}</div>
       <div class="conta-linhas">
         ${L2('Do seu bolso', 'aportes', R(g.acum.bolso))}
         ${g.acum.reinvestido > 0.005 ? L2('Proventos reinvestidos', 'entraram nas compras', `<span class="var-alta">+ ${R(g.acum.reinvestido)}</span>`) : ''}
@@ -2258,7 +2277,7 @@ function desenharBarrasSim({ fim = false } = {}) {
     </div>`;
   } else {
     $('#sim-barras-det').innerHTML = `<div class="conta">
-      <div class="conta-cab"><b>${nomePer}</b><span class="apagado">${esc(cfg.carteiras[ci].nome)}</span></div>
+      <div class="conta-cab"><b>${nomePer}</b>${tagCart(ci, cfg.carteiras[ci].nome, true)}</div>
       <div class="conta-linhas">
         ${L2('Do seu bolso', '', R(g.bolso))}
         ${g.reinvestido > 0.005 ? L2('Proventos reinvestidos', '', `<span class="var-alta">+ ${R(g.reinvestido)}</span>`) : ''}
@@ -2320,7 +2339,7 @@ function desenharGraficoSim() {
     res.forEach((rr, k) => { pts[k].setAttribute('cx', x(i)); pts[k].setAttribute('cy', y(rr.serie[i].total)); });
     res.forEach((rr, k) => { pts[res.length + k].setAttribute('cx', x(i)); pts[res.length + k].setAttribute('cy', y(rr.serie[i].bolso)); });
     dica.hidden = false;
-    dica.innerHTML = `<b>${dataBR(serie[i].data)}</b>${res.map((rr, k) => `<span><i class="sw sim-sw-${CORES_SIM[k]}"></i>${esc(cfg.carteiras[k].nome)} <b class="num">${R(rr.serie[i].total)}</b></span><span class="sim-dica-sub">saiu do bolso <b class="num">${R(rr.serie[i].bolso)}</b></span>${rr.serie[i].proventos > 0.005 ? `<span class="sim-dica-sub">proventos até aqui <b class="num">${R(rr.serie[i].proventos)}</b></span>` : ''}`).join('')}`;
+    dica.innerHTML = `<b>${dataBR(serie[i].data)}</b>${res.map((rr, k) => `<span>${tagCart(k, cfg.carteiras[k].nome)} <b class="num">${R(rr.serie[i].total)}</b></span><span class="sim-dica-sub">saiu do bolso <b class="num">${R(rr.serie[i].bolso)}</b></span>${rr.serie[i].proventos > 0.005 ? `<span class="sim-dica-sub">proventos até aqui <b class="num">${R(rr.serie[i].proventos)}</b></span>` : ''}`).join('')}`;
     const esq = (x(i) / W) * r.width;
     dica.style.left = `${Math.min(Math.max(0, esq - dica.offsetWidth / 2), r.width - dica.offsetWidth)}px`;
   };
@@ -2414,12 +2433,12 @@ function htmlPeriodosSim() {
   const temRF = r.linhas.some((l) => l.tipo !== 'bolsa');
   const temBolsa = r.linhas.some((l) => l.tipo === 'bolsa');
   const controles = `<div class="graf-controles">
-    ${res.length > 1 ? `<div class="seg" role="group" aria-label="Carteira">${res.map((x, i) => `<button type="button" data-sim-cart="${i}" aria-pressed="${i === ci}"><i class="sw sim-sw-${CORES_SIM[i]}"></i> ${esc(cfg.carteiras[i].nome.replace('Carteira ', ''))}</button>`).join('')}</div>` : ''}
+    ${res.length > 1 ? `<div class="seg sim-seg-cart" role="group" aria-label="Carteira">${res.map((x, i) => `<button type="button" data-sim-cart="${i}" aria-pressed="${i === ci}">${tagCart(i, cfg.carteiras[i].nome, true)}</button>`).join('')}</div>` : ''}
     <div class="seg" role="group" aria-label="Período">${[['dia', 'Dia'], ['mes', 'Mês'], ['ano', 'Ano'], ['tudo', 'Tudo']].map(([k, n]) => `<button type="button" data-sim-per="${k}" aria-pressed="${per === k}">${n}</button>`).join('')}</div>
   </div>`;
   if (per === 'dia') {
     return `<section class="bloco sim-periodos">
-      <div class="bloco-cab"><h2 class="sim-h">Operações dia a dia${res.length > 1 ? ` <span class="graf-ativo-nome">· ${esc(cfg.carteiras[ci].nome)}</span>` : ''}</h2>${controles}</div>
+      <div class="bloco-cab"><h2 class="sim-h">Operações dia a dia${res.length > 1 ? ` ${tagCart(ci, cfg.carteiras[ci].nome, true)}` : ''}</h2>${controles}</div>
       ${htmlDiaSim(r)}
     </section>`;
   }
@@ -2435,7 +2454,7 @@ function htmlPeriodosSim() {
     <td class="r num ${clsV(g.ganho)}" data-rot="Ganho"><b>${sinalR(g.ganho)}</b>${g.ganhoPct != null ? `<small class="sim-sub">${pct(g.ganhoPct)}</small>` : ''}</td>
     <td class="r num" data-rot="Valor no fim">${R(g.valorFim)}</td>`;
   return resp(`<section class="bloco sim-periodos">
-    <div class="bloco-cab"><h2 class="sim-h">Por período${res.length > 1 ? ` <span class="graf-ativo-nome">· ${esc(cfg.carteiras[ci].nome)}</span>` : ''}</h2>${controles}</div>
+    <div class="bloco-cab"><h2 class="sim-h">Por período${res.length > 1 ? ` ${tagCart(ci, cfg.carteiras[ci].nome, true)}` : ''}</h2>${controles}</div>
     ${(() => {
       const cab = `<thead><tr><th>${per === 'mes' ? 'Mês' : per === 'ano' ? 'Ano' : 'Período'}</th><th class="r">Do bolso</th>${temBolsa ? '<th class="r">Proventos</th>' : ''}<th class="r">${nomeVal}</th><th class="r">Ganho</th><th class="r">Valor no fim</th></tr></thead>`;
       const corpo = (xs) => `<tbody>${xs.map((g) => `<tr><td class="resp-tit"><b>${esc(rotulo(g))}</b></td>${cel(g)}</tr>`).join('')}</tbody>`;
@@ -2465,7 +2484,7 @@ function renderSimular() {
         <label class="campo"><span>Até</span><input type="date" id="sim-ate" value="${esc(SIM.ate || hojeISO())}" min="2015-01-01" max="${hojeISO()}"><span class="sub">${SIM.ate && SIM.ate < hojeISO() ? '<button type="button" id="sim-ate-hoje">voltar para hoje</button>' : 'último dia: hoje'}</span></label>
         <div class="campo"><span>Simular</span>
           <div class="seg" role="group" aria-label="Quantas carteiras">${[[false, 'Uma carteira'], [true, 'Comparar duas']].map(([k, n]) => `<button type="button" data-comparar="${k}" aria-pressed="${Boolean(SIM.comparar) === k}">${n}</button>`).join('')}</div>
-          <span class="sub">${SIM.comparar ? 'monte as duas e veja qual teria rendido mais' : 'só a Carteira A'}</span></div>
+          <span class="sub">${SIM.comparar ? 'monte as duas e veja qual teria rendido mais' : `só ${esc(nomeCart(SIM.carteiras[0], 0))}`}</span></div>
       </div>
     </section>
     <div class="sim-carteiras">
@@ -2481,6 +2500,7 @@ function renderSimular() {
 
 async function rodarSimulacao({ rolar = true } = {}) {
   const cfg = JSON.parse(JSON.stringify(SIM));
+  cfg.carteiras.forEach((c, i) => { c.nome = nomeCart(SIM.carteiras[i], i); c.comp = composicaoCart(SIM.carteiras[i]); });
   cfg.carteiras = cfg.comparar ? cfg.carteiras : cfg.carteiras.slice(0, 1);
   for (const c of cfg.carteiras) {
     c.itens = c.itens.filter((it) => (Number(it.peso) || 0) > 0);
@@ -2541,7 +2561,7 @@ function abrirEditarAporteSim(chave) {
   const dlg = $('#dlg-compra');
   dlg.innerHTML = `
     <form method="dialog" class="form-edit">
-      <h2>${novo ? 'Aporte extra' : extraId ? 'Editar aporte extra' : 'Editar aporte'} <small class="dica">· ${esc(c.nome)}</small></h2>
+      <h2>${novo ? 'Aporte extra' : extraId ? 'Editar aporte extra' : 'Editar aporte'} ${tagCart(ci, nomeCart(c, ci), true)}</h2>
       <p class="dica">${novo ? 'Um aporte a mais, além dos mensais. Ele é dividido entre os investimentos pelos mesmos percentuais.' : 'Mude a data ou o valor. Se a data não tiver pregão, o aporte vai para o próximo dia útil.'}</p>
       <div class="campos dois">
         <label class="campo"><span>Data</span><input type="date" id="ea-data" value="${esc(data)}" min="${esc(ini)}" max="${esc(fim)}" required><span class="sub">entre ${dataBR(ini)} e ${dataBR(fim)}</span></label>
@@ -2599,6 +2619,8 @@ function ligarSimular() {
     const ok = Math.abs(soma - 100) < 0.01;
     el.textContent = ok ? 'soma 100%' : `soma ${fmtPct0(soma)} — o app divide na proporção`;
     el.classList.toggle('var-baixa', !ok);
+    const tag = raiz.querySelector(`[data-titulo="${ci}"] .sim-tag`);
+    if (tag) tag.outerHTML = tagCart(Number(ci), nomeCart(SIM.carteiras[ci], Number(ci)));
   };
   const trocarGrafico = (fim) => {
     const velho = raiz.querySelector('.sim-grafico');
@@ -2607,6 +2629,12 @@ function ligarSimular() {
   };
   raiz.addEventListener('input', (e) => {
     const t = e.target;
+    if (t.dataset.apelido != null) {
+      const ci = Number(t.dataset.apelido);
+      SIM.carteiras[ci].apelido = t.value; salvarSim();
+      raiz.querySelector(`[data-titulo="${ci}"] .sim-tag`).outerHTML = tagCart(ci, nomeCart(SIM.carteiras[ci], ci));
+      return;
+    }
     if (t.dataset.aporte != null) { SIM.carteiras[t.dataset.aporte].aporte = num(t.value) || 0; salvarSim(); return; }
     if (t.id === 'sim-de') { if (t.value) { SIM.de = t.value; salvarSim(); } return; }
     if (t.id === 'sim-ate') { if (t.value) { SIM.ate = t.value >= hojeISO() ? '' : t.value; salvarSim(); } return; }
@@ -2643,6 +2671,13 @@ function ligarSimular() {
     }
     if (t.hasAttribute('data-novo-aporte')) { abrirEditarAporteSim(null); return; }
     if (t.dataset.voltarAporte) { const c = SIM.carteiras[Math.min(SIM_VISTA.cart, SIM_RES.res.length - 1)]; delete c.edicoes[t.dataset.voltarAporte]; salvarSim(); rodarSimulacao({ rolar: false }); return; }
+    if (t.dataset.renomear != null) {
+      const ci = Number(t.dataset.renomear);
+      SIM_RENOMEAR = SIM_RENOMEAR === ci ? null : ci;
+      redesenharCarteira(ci);
+      raiz.querySelector(`[data-apelido="${ci}"]`)?.focus();
+      return;
+    }
     if (t.dataset.desfazer != null) { const c = SIM.carteiras[t.dataset.desfazer]; c.edicoes = {}; c.extras = []; salvarSim(); redesenharCarteira(t.dataset.desfazer); if (SIM_RES) rodarSimulacao({ rolar: false }); return; }
     if (t.id === 'sim-ate-hoje') { SIM.ate = ''; salvarSim(); render(); return; }
     if (t.dataset.modoProv) { SIM.carteiras[t.dataset.c].proventos = t.dataset.modoProv; salvarSim(); redesenharCarteira(t.dataset.c); return; }

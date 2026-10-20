@@ -1123,3 +1123,28 @@ table.resp .rv { display: block; }
 .sim-card-removido .logo-ativo { background: var(--folha-2); color: var(--tinta-3); }
 .sim-aporte-l > span:first-child { white-space: nowrap; }
 .sim-aporte-l select, .sim-aporte-l .sel-btn { width: min(190px, 60vw); }
+
+/* etiqueta da carteira: letra na cor + nome */
+.sim-tag { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; vertical-align: middle; font-weight: 700; }
+.sim-tag > i { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; font: 800 0.72rem var(--f-display); font-style: normal; color: #fff; }
+.sim-tag-a > i { background: var(--s-acao); }
+.sim-tag-b > i { background: var(--s-tes); }
+.sim-tag > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sim-tag.curto > span { max-width: 150px; }
+.seg .sim-tag { font-weight: 600; }
+.seg .sim-tag > i { width: 18px; height: 18px; font-size: 0.66rem; }
+.sim-cart-tit { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.sim-cart-tit .sim-tag { font-size: 1.05rem; }
+.sim-cart-tit .ic-btn { flex: none; opacity: 0.7; }
+.sim-renomear { display: grid; gap: 4px; }
+.sim-renomear > span { font-size: 0.8rem; font-weight: 600; color: var(--tinta-2); }
+.sim-renomear input { width: 100%; }
+.sh-comp { color: var(--tinta-3); font-size: 0.78rem; margin-top: -6px; }
+.sim-veredito > span { display: block; }
+.sim-veredito .sim-tag { margin-right: 4px; }
+.graf-topo h2 .sim-tag, .sim-h .sim-tag { margin-left: 6px; font-size: 0.92rem; }
+.conta-cab .sim-tag { font-size: 0.82rem; color: var(--tinta-2); }
+@media (max-width: 480px) { .sim-tag.curto > span { max-width: 110px; } }
+.sim-seg-cart { flex-wrap: wrap; border-radius: 18px; max-width: 100%; }
+.sim-seg-cart button { white-space: nowrap; height: auto; min-height: 30px; padding: 4px 12px; max-width: 100%; }
+.sim-tag > i.sim-ab { width: auto; padding: 0 5px; background: linear-gradient(90deg, var(--s-acao), var(--s-tes)); }

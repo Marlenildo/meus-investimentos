@@ -13,7 +13,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.9.0';
+export const VERSAO = '1.10.0';
 const VERSAO_DATA = '2026-10-19';
 
 let S = carregar();
@@ -1707,37 +1707,43 @@ function ligarProventos() {
 
 // ---------- aba Simular ----------
 // "E se eu tivesse aportado R$ X todo primeiro dia útil do mês desde tal mês?" — compara até duas carteiras.
+// Cada carteira tem as próprias opções: aporte, o que fazer com os proventos e o preço de compra.
 const SIM_KEY = 'meus-investimentos:simulador';
 const CORES_SIM = ['a', 'b'];
+const novaCarteiraSim = (nome, itens) => ({ nome, aporte: Number(S.ajustes.aporteMensal) || 2000, proventos: 'dentro', preco: 'fechamento', itens });
 const simPadrao = () => ({
   inicio: '2024-05',
-  aporte: Number(S.ajustes.aporteMensal) || 2000,
-  proventos: 'dentro',
-  preco: 'fechamento',
   comparar: true,
   carteiras: [
-    { nome: 'Carteira A', itens: [{ tipo: 'bolsa', ticker: 'BBAS3', peso: 50 }, { tipo: 'bolsa', ticker: 'PETR4', peso: 50 }] },
-    { nome: 'Carteira B', itens: [{ tipo: 'selic', peso: 100 }] },
+    novaCarteiraSim('Carteira A', [{ tipo: 'bolsa', ticker: 'BBAS3', nome: 'Banco do Brasil ON', classe: 'acao', peso: 50 }, { tipo: 'bolsa', ticker: 'PETR4', nome: 'Petrobras PN', classe: 'acao', peso: 50 }]),
+    novaCarteiraSim('Carteira B', [{ tipo: 'selic', peso: 100 }]),
   ],
 });
 let SIM = (() => {
   try {
     const v = JSON.parse(localStorage.getItem(SIM_KEY) || 'null');
     if (v?.carteiras?.length !== 2) return simPadrao();
-    if (!v.proventos) { v.proventos = v.reinvestir === false ? 'guardar' : 'dentro'; delete v.reinvestir; }
-    if (!v.preco) v.preco = 'fechamento';
+    // versões anteriores tinham aporte, proventos e preço valendo para as duas carteiras
+    const prov = v.proventos || (v.reinvestir === false ? 'guardar' : 'dentro');
+    for (const c of v.carteiras) {
+      c.aporte ??= v.aporte ?? (Number(S.ajustes.aporteMensal) || 2000);
+      c.proventos ??= prov;
+      c.preco ??= v.preco || 'fechamento';
+    }
+    delete v.aporte; delete v.proventos; delete v.preco; delete v.reinvestir;
     return v;
   } catch { return simPadrao(); }
 })();
 const MODOS_PROV = {
-  dentro: ['Fazem parte do aporte', 'o aporte é o total investido no mês; os proventos do mês anterior pagam parte e do bolso sai só a diferença'],
-  somar: ['Somam ao aporte', 'sai o aporte inteiro do bolso e os proventos do mês anterior entram por cima'],
-  guardar: ['Guardar', 'sai o aporte inteiro do bolso e os proventos ficam com você, fora da carteira'],
+  dentro: ['Pagam parte do aporte', 'O aporte é o total investido no mês. Os proventos recebidos pagam parte e do bolso sai só o que falta.'],
+  somar: ['Somam ao aporte', 'Sai o aporte inteiro do bolso e os proventos entram por cima, investindo mais.'],
+  guardar: ['Ficam comigo', 'Sai o aporte inteiro do bolso e os proventos não são reinvestidos.'],
 };
 const salvarSim = () => { try { localStorage.setItem(SIM_KEY, JSON.stringify(SIM)); } catch { /* sem armazenamento */ } };
 let SIM_RES = null; // { cfg, res: [resultado A, resultado B?] }
 let simulando = false;
 let SIM_VISTA = { per: 'ano', cart: 0, filtro: 'tudo' }; // por período: 'dia' | 'mes' | 'ano' | 'tudo', qual carteira e o filtro da lista do dia
+let SIM_G = { modo: 'acumulado', per: 'mes', cart: 0, sel: null }; // gráfico: carteira (ou 'comp'), período, modo e barra escolhida
 const cacheSim = new Map();
 
 async function apiSim(caminho) {
@@ -1755,12 +1761,17 @@ async function apiSim(caminho) {
 
 const pesoSoma = (c) => c.itens.reduce((s, it) => s + (Number(it.peso) || 0), 0);
 const fmtPct0 = (v) => `${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+const temBolsaSim = (c) => c.itens.some((it) => it.tipo === 'bolsa');
+/** Nas tabelas que viram cartões no celular, o conteúdo de cada célula fica junto, à direita do rótulo. */
+const resp = (html) => html.replace(/(<td [^>]*data-rot="[^"]*"[^>]*>)([\s\S]*?)(<\/td>)/g, '$1<span class="rv">$2</span>$3');
+const sinalR = (v) => `${v >= 0 ? '+' : '−'} ${R(Math.abs(v))}`;
+const clsV = (v) => (v >= 0 ? 'var-alta' : 'var-baixa');
 
 function htmlItemSim(it, ci, ii) {
   const t = TIPOS_SIM[it.tipo] || TIPOS_SIM.bolsa;
   const meio = it.tipo === 'bolsa'
     ? `<button type="button" class="sim-ativo-btn ${it.ticker ? '' : 'vazio'}" data-escolher aria-label="${it.ticker ? `Trocar ${esc(it.ticker)}` : 'Escolher ativo'}">
-        ${it.ticker ? `${htmlLogo({ ticker: it.ticker, tipo: it.classe || 'acao' })}<span class="sa-txt"><b>${esc(it.ticker)}</b><small>${esc(it.nome || nomeDoAtivo(it.ticker) || '')}</small></span>` : `<span class="sa-txt"><b>Escolher ativo</b><small>buscar por nome ou código</small></span>`}
+        ${it.ticker ? `${htmlLogo({ ticker: it.ticker, tipo: it.classe || 'acao' })}<span class="sa-txt"><b>${esc(it.ticker)}</b><small>${esc(it.nome || nomeDoAtivo(it.ticker) || '')}</small></span>` : '<span class="sa-txt"><b>Escolher ativo</b><small>buscar por nome ou código</small></span>'}
       </button>`
     : t.taxa
       ? `<span class="sim-taxa"><input class="num" data-campo="taxa" inputmode="decimal" value="${esc(String(it.taxa ?? t.taxa.padrao).replace('.', ','))}" aria-label="${esc(t.taxa.rotulo)}"><small>${esc(t.taxa.sufixo)}</small></span>`
@@ -1775,13 +1786,30 @@ function htmlItemSim(it, ci, ii) {
 
 function htmlCarteiraSim(c, ci) {
   const soma = pesoSoma(c);
+  const bolsa = temBolsaSim(c);
   return `<section class="bloco sim-carteira sim-${CORES_SIM[ci]}" data-carteira="${ci}">
     <div class="bloco-cab"><h2><i class="sw sim-sw-${CORES_SIM[ci]}"></i>${esc(c.nome)}</h2>
       <small class="sim-soma ${Math.abs(soma - 100) < 0.01 ? '' : 'var-baixa'}" data-soma="${ci}">${Math.abs(soma - 100) < 0.01 ? 'soma 100%' : `soma ${fmtPct0(soma)} — o app divide na proporção`}</small></div>
-    <div class="sim-itens">${c.itens.map((it, ii) => htmlItemSim(it, ci, ii)).join('')}</div>
+    <label class="sim-aporte-c"><span>Aporte por mês</span><span class="sim-aporte-in"><small>R$</small><input class="num" data-aporte="${ci}" inputmode="decimal" value="${Number(c.aporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}" aria-label="Aporte por mês da ${esc(c.nome)}"></span></label>
+    <div class="sim-itens">
+      <div class="sim-itens-cab" aria-hidden="true"><span>Onde investir</span><span></span><span>% do aporte</span><span></span></div>
+      ${c.itens.map((it, ii) => htmlItemSim(it, ci, ii)).join('')}
+    </div>
     <div><button type="button" class="btn peq" data-add="${ci}">+ Investimento</button></div>
+    ${bolsa ? `<div class="sim-opcoes">
+      <div class="sim-op">
+        <span class="sim-op-tit">Proventos (dividendos, JCP, rendimentos)</span>
+        <div class="sim-escolhas">${Object.entries(MODOS_PROV).map(([k, [n, d]]) => `<button type="button" class="sim-escolha" data-modo-prov="${k}" data-c="${ci}" aria-pressed="${c.proventos === k}"><b>${n}</b><small>${d}</small></button>`).join('')}</div>
+      </div>
+      <div class="sim-op">
+        <span class="sim-op-tit">Preço da compra na bolsa</span>
+        <div class="seg sim-seg" role="group" aria-label="Preço de compra">${Object.entries(PRECOS_COMPRA).map(([k, [n]]) => `<button type="button" data-preco="${k}" data-c="${ci}" aria-pressed="${c.preco === k}">${n}</button>`).join('')}</div>
+        <small class="dica">${PRECOS_COMPRA[c.preco][1]}</small>
+      </div>
+    </div>` : '<p class="dica sim-so-rf">Só renda fixa: rende todo dia útil e não paga proventos, então não há opções de proventos nem de preço de compra.</p>'}
   </section>`;
 }
+
 
 // ---------- escolher o ativo: busca por nome ou código ----------
 /** Ativos que você já tem ou acompanha, com o nome que o app conhece. */
@@ -1862,96 +1890,356 @@ function abrirEscolherAtivo(aoEscolher, opts = {}) {
 }
 
 // ---------- resultado ----------
+
+// ---------- resultado ----------
 const ROTULO_PRECO = { fechamento: 'fechamento', abertura: 'abertura', medio: 'preço médio do dia' };
 const NOMES_PROV_RES = { dividendo: 'Dividendos', jcp: 'JCP (juros sobre capital próprio)', rendimento: 'Rendimentos de FII', outro: 'Outros proventos', provento: 'Proventos sem tipo informado' };
 const ORDEM_PROV_SIM = ['dividendo', 'jcp', 'rendimento', 'outro', 'provento'];
 const swProv = (t) => `<i class="sw pv-${t === 'provento' ? 'outro' : esc(t)}"></i>`;
+const NOME_CLASSE_SIM = { acao: 'Ações', fii: 'FIIs', outros: 'ETF/BDR', tesouro: 'Tesouro', rf: 'CDB e LCI' };
+
+/** Cartão de cada carteira: quanto vale hoje, o ganho e de onde ele veio. */
+function htmlHeroiSim(r, c, i) {
+  const v = r.valorizacao, prov = r.proventos;
+  // barra: o que saiu do bolso + valorização + proventos = valor hoje (perda aparece em vermelho, dentro do bolso)
+  const base = Math.max(r.total, r.bolso + prov, 1);
+  const w = (x) => `${Math.max(0, (x / base) * 100).toFixed(2)}%`;
+  const segs = v >= 0
+    ? `<i class="sh-bolso" style="width:${w(r.bolso)}"></i><i class="sh-val" style="width:${w(v)}"></i><i class="sh-prov" style="width:${w(prov)}"></i>`
+    : `<i class="sh-bolso" style="width:${w(r.bolso + v)}"></i><i class="sh-perda" style="width:${w(-v)}"></i><i class="sh-prov" style="width:${w(prov)}"></i>`;
+  const modo = r.linhas.some((l) => l.tipo === 'bolsa') ? ` · proventos: ${MODOS_PROV[r.modo][0].toLowerCase()}` : '';
+  return `<div class="sim-heroi sim-${CORES_SIM[i]}">
+    <div class="sh-cab"><b><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(c.nome)}</b><small>${R(r.aporteMes)}/mês${modo}</small></div>
+    <div class="sh-num"><small>Valor hoje</small><b class="sh-valor num">${R(r.total)}</b>
+      <span class="sh-ganho ${clsV(r.ganho)}">${sinalR(r.ganho)} <small>(${pct(r.ganhoPct)})</small> de ganho</span></div>
+    <div class="sh-barra" role="img" aria-label="Do bolso ${R(r.bolso)}, valorização ${R(v)}, proventos ${R(prov)}">${segs}</div>
+    <div class="sh-leg">
+      <span><i class="sw sh-sw-bolso"></i>Saiu do bolso<b class="num">${R(r.bolso)}</b></span>
+      <span><i class="sw ${v >= 0 ? 'sh-sw-val' : 'sh-sw-perda'}"></i>${r.linhas.every((l) => l.tipo !== 'bolsa') ? 'Rendimento' : 'Valorização'}<b class="num ${clsV(v)}">${sinalR(v)}</b></span>
+      ${r.linhas.some((l) => l.tipo === 'bolsa') ? `<span><i class="sw sh-sw-prov"></i>Proventos<b class="num ${prov ? 'var-alta' : ''}">${prov ? `+ ${R(prov)}` : '—'}</b></span>` : ''}
+    </div>
+  </div>`;
+}
 
 function htmlResultadoSim() {
   if (!SIM_RES) return '';
   const { res, cfg } = SIM_RES;
-  const cls = (v) => (v >= 0 ? 'var-alta' : 'var-baixa');
   const r0 = res[0];
   const melhor = res.length === 2 ? (res[0].ganho >= res[1].ganho ? 0 : 1) : null;
   const temRF = res.some((r) => r.linhas.some((l) => l.tipo !== 'bolsa'));
   const temBolsa = res.some((r) => r.linhas.some((l) => l.tipo === 'bolsa'));
   const temIR = res.some((r) => r.ir > 0.005);
-  const dentro = r0.modo === 'dentro';
-  const sinal = (v) => `${v >= 0 ? '+' : '−'} ${R(Math.abs(v))}`;
   const linha = (rot, f, cl = '') => `<div class="${cl}"><span>${rot}</span>${res.map(f).join('')}</div>`;
   const tiposProv = ORDEM_PROV_SIM.filter((t) => res.some((r) => (r.provTipos[t] || 0) > 0.005));
   const veredito = () => {
     if (melhor == null) return '';
     const a = res[melhor], b = res[1 - melhor];
     const difBolso = b.bolso - a.bolso;
-    return `<p class="sim-veredito"><b>${esc(cfg.carteiras[melhor].nome)}</b> teria ganho ${R(a.ganho - b.ganho)} a mais${Math.abs(difBolso) > 1 ? `, ${difBolso > 0 ? `saindo ${R(difBolso)} a menos` : `mesmo saindo ${R(-difBolso)} a mais`} do seu bolso` : ''}.</p>`;
+    return `<p class="sim-veredito"><i class="sw sim-sw-${CORES_SIM[melhor]}"></i><span><b>${esc(cfg.carteiras[melhor].nome)}</b> teria ganho <b>${R(a.ganho - b.ganho)} a mais</b>${Math.abs(difBolso) > 1 ? `, ${difBolso > 0 ? `saindo ${R(difBolso)} a menos` : `mesmo saindo ${R(-difBolso)} a mais`} do seu bolso` : ''}.</span></p>`;
   };
   return `
     <section class="bloco sim-res">
-      <div class="bloco-cab"><h2>Resultado</h2><small>${r0.nAportes} aportes de ${R(cfg.aporte)} · ${dataBR(r0.inicio)} a ${dataBR(r0.fim)} · compra pelo ${ROTULO_PRECO[r0.modoPreco]}</small></div>
+      <div class="bloco-cab"><h2>Resultado</h2><small>${r0.nAportes} aportes · ${dataBR(r0.inicio)} a ${dataBR(r0.fim)}</small></div>
       ${veredito()}
-      <div class="sim-comp" style="--cols:${res.length}">
-        <div class="sim-comp-cab"><span></span>${res.map((r, i) => `<b><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)}</b>`).join('')}</div>
-        ${linha(`Saiu do seu bolso <small>${dentro ? `${R(cfg.aporte)} por mês menos os proventos recebidos no mês` : `${R(cfg.aporte)} por mês`}</small>`, (r) => `<span class="num forte">${R(r.bolso)}<small>média de ${R(r.bolso / r.nAportes)} por mês</small></span>`)}
-        ${r0.modo !== 'guardar' ? linha('Proventos reinvestidos <small>entraram nas compras do mês seguinte</small>', (r) => `<span class="num">${r.reinvestido > 0.005 ? `+ ${R(r.reinvestido)}` : '—'}</span>`, 'sim-parte') : ''}
-        ${r0.modo !== 'guardar' ? linha('Total investido <small>bolso + proventos reinvestidos</small>', (r) => `<span class="num">${R(r.investido)}</span>`) : ''}
-        ${linha('Valor hoje', (r) => `<span class="num forte">${R(r.total)}${r.provFora > 0.005 ? `<small>com ${R(r.provFora)} de proventos guardados</small>` : ''}${r.provPend > 0.005 ? `<small>com ${R(r.provPend)} de proventos para o próximo aporte</small>` : ''}${r.caixa > 0.5 ? `<small>com ${R(r.caixa)} de sobra em caixa</small>` : ''}</span>`)}
-        ${temBolsa ? linha('Valorização das cotas <small>preço de hoje − preço pago, já com as taxas</small>', (r) => (r.linhas.some((l) => l.tipo === 'bolsa') ? `<span class="num ${cls(r.valorizacaoBolsa)}">${sinal(r.valorizacaoBolsa)} <small>${pct(r.bolso ? r.valorizacaoBolsa / r.bolso : null)}</small></span>` : '<span class="num">—</span>'), 'sim-parte') : ''}
-        ${temRF ? linha('Rendimento da renda fixa <small>juros do Tesouro, CDB ou LCI</small>', (r) => (r.linhas.some((l) => l.tipo !== 'bolsa') ? `<span class="num ${cls(r.rendimentoRF)}">${sinal(r.rendimentoRF)} <small>${pct(r.bolso ? r.rendimentoRF / r.bolso : null)}</small></span>` : '<span class="num">—</span>'), 'sim-parte') : ''}
-        ${linha('Proventos recebidos <small>já líquidos, caídos na conta</small>', (r) => `<span class="num ${r.proventos ? 'var-alta' : ''}">${r.proventos ? `+ ${R(r.proventos)} <small>${pct(r.bolso ? r.proventos / r.bolso : null)}</small>` : '—'}</span>`, 'sim-parte')}
-        ${tiposProv.map((t) => linha(`${swProv(t)}${esc(NOMES_PROV_RES[t])}${t === 'jcp' ? ' <small>líquido, sem os 15% de IR retidos</small>' : t === 'rendimento' ? ' <small>isentos de IR</small>' : t === 'dividendo' ? ' <small>isentos de IR</small>' : ''}`, (r) => `<span class="num">${r.provTipos[t] ? R(r.provTipos[t]) : '—'}${t === 'jcp' && r.irJcp > 0.005 ? `<small>IR retido ${R(r.irJcp)}</small>` : ''}</span>`, 'sim-sub-tipo')).join('')}
-        ${linha('Ganho total <small>valor hoje − o que saiu do bolso</small>', (r) => `<span class="num ${cls(r.ganho)}">${sinal(r.ganho)} <small>${pct(r.ganhoPct)}</small></span>`, 'sim-total')}
-        ${res.some((r) => r.aReceberTotal > 0.005) ? linha('A receber <small>data-com já passou, pagamento depois de hoje (fora do ganho)</small>', (r) => `<span class="num">${r.aReceberTotal > 0.005 ? R(r.aReceberTotal) : '—'}</span>`) : ''}
-        ${temIR ? linha('Se resgatasse hoje <small>− IR da renda fixa</small>', (r) => `<span class="num">${R(r.liquido)}</span>`) : ''}
-      </div>
+      <div class="sim-herois">${res.map((r, i) => htmlHeroiSim(r, cfg.carteiras[i], i)).join('')}</div>
+      <details class="sim-det" ${matchMedia('(min-width: 721px)').matches ? 'open' : ''}>
+        <summary>Todos os números</summary>
+        <div class="sim-comp" style="--cols:${res.length}">
+          ${res.length > 1 ? `<div class="sim-comp-cab"><span></span>${res.map((r, i) => `<b><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)}</b>`).join('')}</div>` : ''}
+          ${linha('Saiu do seu bolso <small>aportes, descontados os proventos usados</small>', (r) => `<span class="num forte">${R(r.bolso)}<small>média de ${R(r.bolso / r.nAportes)} por mês</small></span>`)}
+          ${res.some((r) => r.reinvestido > 0.005) ? linha('Proventos reinvestidos <small>entraram nas compras</small>', (r) => `<span class="num">${r.reinvestido > 0.005 ? `+ ${R(r.reinvestido)}` : '—'}</span>`, 'sim-parte') : ''}
+          ${res.some((r) => r.reinvestido > 0.005) ? linha('Total investido <small>bolso + proventos reinvestidos</small>', (r) => `<span class="num">${R(r.investido)}</span>`) : ''}
+          ${linha('Valor hoje', (r) => `<span class="num forte">${R(r.total)}${r.provFora > 0.005 ? `<small>com ${R(r.provFora)} de proventos guardados</small>` : ''}${r.provPend > 0.005 ? `<small>com ${R(r.provPend)} de proventos para o próximo aporte</small>` : ''}${r.caixa > 0.5 ? `<small>com ${R(r.caixa)} de sobra em caixa</small>` : ''}</span>`)}
+          ${temBolsa ? linha('Valorização das cotas <small>preço de hoje − preço pago, com as taxas</small>', (r) => (r.linhas.some((l) => l.tipo === 'bolsa') ? `<span class="num ${clsV(r.valorizacaoBolsa)}">${sinalR(r.valorizacaoBolsa)} <small>${pct(r.bolso ? r.valorizacaoBolsa / r.bolso : null)}</small></span>` : '<span class="num">—</span>'), 'sim-parte') : ''}
+          ${temRF ? linha('Rendimento da renda fixa <small>juros do Tesouro, CDB ou LCI</small>', (r) => (r.linhas.some((l) => l.tipo !== 'bolsa') ? `<span class="num ${clsV(r.rendimentoRF)}">${sinalR(r.rendimentoRF)} <small>${pct(r.bolso ? r.rendimentoRF / r.bolso : null)}</small></span>` : '<span class="num">—</span>'), 'sim-parte') : ''}
+          ${temBolsa ? linha('Proventos recebidos <small>já líquidos, caídos na conta</small>', (r) => `<span class="num ${r.proventos ? 'var-alta' : ''}">${r.proventos ? `+ ${R(r.proventos)} <small>${pct(r.bolso ? r.proventos / r.bolso : null)}</small>` : '—'}</span>`, 'sim-parte') : ''}
+          ${tiposProv.map((t) => linha(`${swProv(t)}${esc(NOMES_PROV_RES[t])}${t === 'jcp' ? ' <small>líquido, sem os 15% de IR</small>' : t === 'dividendo' || t === 'rendimento' ? ' <small>isentos de IR</small>' : ''}`, (r) => `<span class="num">${r.provTipos[t] ? R(r.provTipos[t]) : '—'}${t === 'jcp' && r.irJcp > 0.005 ? `<small>IR retido ${R(r.irJcp)}</small>` : ''}</span>`, 'sim-sub-tipo')).join('')}
+          ${linha('Ganho total <small>valor hoje − o que saiu do bolso</small>', (r) => `<span class="num ${clsV(r.ganho)}">${sinalR(r.ganho)} <small>${pct(r.ganhoPct)}</small></span>`, 'sim-total')}
+          ${res.some((r) => r.aReceberTotal > 0.005) ? linha('A receber <small>data-com já passou, pago depois de hoje</small>', (r) => `<span class="num">${r.aReceberTotal > 0.005 ? R(r.aReceberTotal) : '—'}</span>`) : ''}
+          ${temIR ? linha('Se resgatasse hoje <small>− IR da renda fixa</small>', (r) => `<span class="num">${R(r.liquido)}</span>`) : ''}
+        </div>
+      </details>
     </section>
 
-    <section class="bloco">
-      <div class="bloco-cab"><h2>Evolução</h2>
-        <div class="sim-legenda">${res.map((r, i) => `<span><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)}</span>`).join('')}<span><i class="sw sim-sw-inv"></i>Saiu do bolso</span></div></div>
-      <div class="sim-graf" id="sim-graf"></div>
-    </section>
+    ${htmlGraficoBarrasSim()}
 
     ${htmlPeriodosSim()}
 
-    ${res.map((r, i) => `<section class="bloco">
+    ${res.map((r, i) => resp(`<section class="bloco">
       <div class="bloco-cab"><h2 class="sim-h"><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)} · por investimento</h2></div>
-      <div class="tabela-wrap"><table>
+      <table class="resp">
         <thead><tr><th>Investimento</th><th class="r">Aplicado</th><th class="r">Cotas</th><th class="r">Valor hoje</th><th class="r">Valorização</th><th class="r">Proventos</th><th class="r">Resultado</th></tr></thead>
-        <tbody>${r.linhas.map((l) => `<tr><td><b>${esc(l.rotulo)}</b> <small class="dica">${fmtPct0(l.peso * 100)}</small></td><td class="r num">${R(l.aplicado)}</td><td class="r num">${l.qtd != null ? fmtQtd(l.qtd) : '—'}</td><td class="r num">${R(l.valor)}</td><td class="r num ${cls(l.valorizacao)}">${sinal(l.valorizacao)}</td><td class="r num">${l.proventos ? R(l.proventos) : '—'}${l.proventos ? `<small class="sim-sub">${ORDEM_PROV_SIM.filter((t) => l.porTipo[t]).map((t) => `${t === 'provento' ? 'sem tipo' : TIPOS_PROV_SIM[t]} ${R(l.porTipo[t])}`).join(' · ')}</small>` : ''}</td><td class="r num ${cls(l.resultado)}">${R(l.resultado)} <small>${pct(l.aplicado ? l.resultado / l.aplicado : null)}</small></td></tr>`).join('')}</tbody>
-      </table></div>
-    </section>`).join('')}
+        <tbody>${r.linhas.map((l) => `<tr>
+          <td data-rot="Investimento"><b>${esc(l.rotulo)}</b> <small class="dica">${fmtPct0(l.peso * 100)}</small></td>
+          <td class="r num" data-rot="Aplicado">${R(l.aplicado)}</td>
+          <td class="r num" data-rot="Cotas">${l.qtd != null ? fmtQtd(l.qtd) : '—'}</td>
+          <td class="r num" data-rot="Valor hoje">${R(l.valor)}</td>
+          <td class="r num ${clsV(l.valorizacao)}" data-rot="${l.tipo === 'bolsa' ? 'Valorização' : 'Rendimento'}">${sinalR(l.valorizacao)}</td>
+          <td class="r num" data-rot="Proventos">${l.proventos ? R(l.proventos) : '—'}${l.proventos ? `<small class="sim-sub">${ORDEM_PROV_SIM.filter((t) => l.porTipo[t]).map((t) => `${t === 'provento' ? 'sem tipo' : TIPOS_PROV_SIM[t]} ${R(l.porTipo[t])}`).join(' · ')}</small>` : ''}</td>
+          <td class="r num ${clsV(l.resultado)}" data-rot="Resultado"><b>${R(l.resultado)}</b> <small>${pct(l.aplicado ? l.resultado / l.aplicado : null)}</small></td></tr>`).join('')}</tbody>
+      </table>
+    </section>`)).join('')}
 
     ${htmlGlossarioSim()}`;
 }
 
-function htmlGlossarioSim() {
-  const it = (t, d) => `<div><dt>${t}</dt><dd>${d}</dd></div>`;
-  return `<details class="bloco sim-glossario">
-    <summary><h2>Entenda cada número</h2></summary>
-    <dl>
-      ${it('Saiu do seu bolso', 'Dinheiro novo que você colocou. No modo "fazem parte do aporte", é o aporte do mês menos os proventos que caíram desde o aporte anterior.')}
-      ${it('Proventos reinvestidos', 'Proventos que pagaram parte das compras do mês seguinte, em vez de sair do seu bolso.')}
-      ${it('Total investido', 'Tudo o que foi usado nas compras: o que saiu do bolso mais os proventos reinvestidos.')}
-      ${it('Valor hoje', 'Cotas × preço de hoje, mais o valor atualizado da renda fixa, mais o dinheiro parado (sobra das cotas inteiras e proventos esperando o próximo aporte).')}
-      ${it('Valorização das cotas', 'Quanto as cotas valem hoje a mais (ou a menos) do que você pagou por elas, já com as taxas da B3. É ganho "no papel": só vira dinheiro se vender.')}
-      ${it('Rendimento da renda fixa', 'Juros acumulados no Tesouro, CDB ou LCI/LCA, dia a dia, pela taxa escolhida.')}
-      ${it(`${swProv('dividendo')}Dividendo`, 'Parte do lucro da empresa paga a quem tem a ação. Isento de IR para pessoa física.')}
-      ${it(`${swProv('jcp')}JCP — juros sobre capital próprio`, 'Outra forma de a empresa distribuir lucro. Tem 15% de IR retido na fonte: o app mostra o valor líquido, o que cai na conta.')}
-      ${it(`${swProv('rendimento')}Rendimento de FII`, 'Distribuição mensal dos fundos imobiliários (aluguéis, juros de CRI). Isento de IR para pessoa física.')}
-      ${it('Data-com, data ex e pagamento', 'Tem direito ao provento quem tem a cota no fim da data-com; no dia seguinte (data ex) a cota já é negociada sem ele. O dinheiro cai depois, na data de pagamento — às vezes semanas ou meses depois. O app conta o direito na data-com e o dinheiro no pagamento.')}
-      ${it('A receber', 'Proventos cuja data-com já passou mas que ainda não foram pagos. Não entram no ganho até caírem na conta.')}
-      ${it('Ganho total', 'Valor hoje − o que saiu do seu bolso. É a soma da valorização das cotas, do rendimento da renda fixa e dos proventos recebidos.')}
-      ${it('Preço de compra', 'A bolsa guarda, para cada dia, abertura (10h), mínima, máxima e fechamento (cerca de 18h). O app compra pelo que você escolher; o preço de cada hora do dia não fica guardado nas fontes grátis. Cada compra mostra a faixa do dia para você comparar.')}
-      ${it('Cotas inteiras e sobra', 'Na bolsa só se compra cota inteira. O que não dá para uma cota fica em caixa e entra no aporte do mês seguinte.')}
-      ${it('Taxas', 'Ações, FIIs e ETFs pagam 0,03% de taxas da B3 em cada compra (corretagem zero). Tesouro e CDB não têm taxa na compra; a custódia do Tesouro não está na conta.')}
-      ${it('IR da renda fixa', 'Tesouro e CDB pagam IR só no resgate, de 22,5% (até 6 meses) a 15% (mais de 2 anos) sobre o rendimento. LCI/LCA é isenta. Ações vendidas até R$ 20 mil por mês são isentas; FIIs pagam 20% sobre o lucro na venda.')}
-    </dl>
-    <p class="dica">Fontes: preços e proventos do Yahoo Finance; tipo e data de pagamento dos proventos do Status Invest (ou da brapi); Selic, CDI e IPCA do Banco Central. É uma estimativa, não recomendação de investimento.</p>
-  </details>`;
+// ---------- gráfico no estilo do Histórico: barras por mês ou ano ----------
+/** Junta os meses de uma simulação em períodos, com os acumulados até o fim de cada um. */
+function linhasGraficoSim(r, per) {
+  const out = [];
+  const acum = { bolso: 0, reinvestido: 0, proventos: 0, aplicado: {}, provTipos: {} };
+  for (const m of r.porMes) {
+    const k = per === 'ano' ? m.mes.slice(0, 4) : m.mes;
+    let g = out[out.length - 1];
+    if (!g || g.chave !== k) { g = { chave: k, bolso: 0, reinvestido: 0, proventos: 0, aplicado: {}, provTipos: {} }; out.push(g); }
+    g.bolso += m.bolso; g.reinvestido += m.reinvestido; g.proventos += m.proventos;
+    acum.bolso += m.bolso; acum.reinvestido += m.reinvestido; acum.proventos += m.proventos;
+    for (const [c, v] of Object.entries(m.aplicado)) { g.aplicado[c] = (g.aplicado[c] || 0) + v; acum.aplicado[c] = (acum.aplicado[c] || 0) + v; }
+    for (const [t, v] of Object.entries(m.provTipos)) { g.provTipos[t] = (g.provTipos[t] || 0) + v; acum.provTipos[t] = (acum.provTipos[t] || 0) + v; }
+    g.valorFim = m.valorFim; g.valorClasse = m.valorClasse;
+    g.acum = JSON.parse(JSON.stringify(acum));
+  }
+  const ganhos = resumoPorPeriodoSim(r.porMes, per);
+  out.forEach((g, i) => { g.ganho = ganhos[i]?.ganho ?? 0; g.ganhoPct = ganhos[i]?.ganhoPct ?? null; });
+  return out;
 }
 
-// ---------- por período: dia (cada operação), mês, ano, tudo ----------
+function htmlGraficoBarrasSim() {
+  const { res, cfg } = SIM_RES;
+  const comp = res.length > 1 && SIM_G.cart === 'comp';
+  const ci = comp ? 0 : Math.min(Number(SIM_G.cart) || 0, res.length - 1);
+  const controles = `<div class="graf-controles">
+    ${res.length > 1 ? `<div class="seg" role="group" aria-label="Carteira">${res.map((x, i) => `<button type="button" data-g-cart="${i}" aria-pressed="${!comp && i === ci}"><i class="sw sim-sw-${CORES_SIM[i]}"></i> ${esc(cfg.carteiras[i].nome.replace('Carteira ', ''))}</button>`).join('')}<button type="button" data-g-cart="comp" aria-pressed="${comp}">A × B</button></div>` : ''}
+    ${comp ? '' : `<div class="seg" role="group" aria-label="Mostrar">${[['periodo', 'No período'], ['acumulado', 'Acumulado']].map(([k, n]) => `<button type="button" data-g-modo="${k}" aria-pressed="${SIM_G.modo === k}">${n}</button>`).join('')}</div>
+    <div class="seg" role="group" aria-label="Agrupar por">${[['mes', 'Mês'], ['ano', 'Ano']].map(([k, n]) => `<button type="button" data-g-per="${k}" aria-pressed="${SIM_G.per === k}">${n}</button>`).join('')}</div>`}
+  </div>`;
+  if (comp) {
+    return `<section class="bloco grafico-bloco sim-grafico">
+      <div class="graf-topo"><div><h2>Evolução das duas carteiras</h2><small class="sub-cab">valor de cada uma e o que saiu do bolso, mês a mês</small></div>${controles}</div>
+      <div class="sim-legenda">${res.map((r, i) => `<span><i class="sw sim-sw-${CORES_SIM[i]}"></i>${esc(cfg.carteiras[i].nome)}</span>`).join('')}<span><i class="sw sim-sw-inv"></i>Saiu do bolso</span></div>
+      <div class="sim-graf" id="sim-graf"></div>
+    </section>`;
+  }
+  const acum = SIM_G.modo === 'acumulado';
+  return `<section class="bloco grafico-bloco sim-grafico">
+    <div class="graf-topo"><div><h2>${acum ? 'Total acumulado' : 'Quanto investiu'}${res.length > 1 ? ` <span class="graf-ativo-nome">· ${esc(cfg.carteiras[ci].nome)}</span>` : ''}</h2>
+      <small class="sub-cab">${acum ? 'investido por tipo, com a valorização por cima; proventos na barrinha ao lado' : 'quanto entrou em cada tipo no período; proventos recebidos na barrinha ao lado'}</small></div>${controles}</div>
+    <div class="graf-rolagem" id="sim-barras"></div>
+    <div class="graf-legenda" id="sim-barras-leg"></div>
+    <div class="graf-detalhe" id="sim-barras-det"></div>
+  </section>`;
+}
+
+function desenharBarrasSim({ fim = false } = {}) {
+  const box = $('#sim-barras');
+  if (!box || !SIM_RES) return;
+  const { res, cfg } = SIM_RES;
+  const ci = Math.min(Number(SIM_G.cart) || 0, res.length - 1);
+  const r = res[ci];
+  const per = SIM_G.per, acum = SIM_G.modo === 'acumulado';
+  const linhas = linhasGraficoSim(r, per);
+  const n = linhas.length;
+  const pilha = PILHA.filter((k) => linhas.some((g) => (g.acum.aplicado[k] || 0) > 0.005));
+  const temProv = linhas.some((g) => g.acum.proventos > 0.005);
+  const L = Math.max(280, Math.round(box.clientWidth || 600));
+  const minimo = per === 'ano' ? 86 : acum ? 92 : 78;
+  const slot = n * minimo <= L ? L / Math.max(n, 1) : minimo;
+  const W = Math.round(n * slot);
+  const H = acum ? 300 : 270, topo = acum ? 62 : 46, base = 30, alt = H - topo - base;
+  const blocosDe = (g) => pilha.map((k) => ({
+    k, investido: acum ? g.acum.aplicado[k] || 0 : g.aplicado[k] || 0,
+    vale: acum ? g.valorClasse[k] || 0 : null,
+  })).filter((b) => b.investido > 0.005 || (b.vale || 0) > 0.005);
+  const blocos = linhas.map(blocosDe);
+  const provDe = (g) => (acum ? g.acum.proventos : g.proventos);
+  const tiposDe = (g) => (acum ? g.acum.provTipos : g.provTipos);
+  const altura = blocos.map((bs) => bs.reduce((s2, b) => s2 + Math.max(b.investido, b.vale ?? 0), 0));
+  const maxV = Math.max(1, ...linhas.map((g, i) => Math.max(altura[i], provDe(g), acum ? g.valorFim : 0)));
+  const y = (v) => topo + alt * (1 - v / maxV);
+  const duas = pilha.length && temProv;
+  const wInv = Math.min(58, Math.max(18, slot * (duas ? 0.46 : 0.5)));
+  const wProv = duas ? Math.min(26, Math.max(10, slot * 0.18)) : wInv;
+  const sel = Math.min(SIM_G.sel ?? n - 1, n - 1);
+  const curto = (v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : Math.round(v).toLocaleString('pt-BR'));
+  const grade = [0.25, 0.5, 0.75, 1].map((f) => `<line class="grade" x1="0" x2="${W}" y1="${topo + alt * (1 - f)}" y2="${topo + alt * (1 - f)}"/>`).join('');
+  const barras = linhas.map((g, i) => {
+    const cx = i * slot + slot / 2;
+    const largGrupo = duas ? wInv + 3 + wProv : wInv;
+    const xInv = cx - largGrupo / 2;
+    const xProv = duas ? xInv + wInv + 3 : cx - wProv / 2;
+    const etiqueta = (x, w, vTopo, vBase, texto, cls) => {
+      const yT = y(vTopo), yB = y(vBase);
+      return w < 30 || yB - yT < 12 ? '' : `<text class="seg-rot ${cls}" x="${x + w / 2}" y="${(yT + yB) / 2 + 3.5}" text-anchor="middle">${texto}</text>`;
+    };
+    let ac = 0, segs = '', rot = '';
+    for (const b of blocos[i]) {
+      const temValor = b.vale != null;
+      const cheio = temValor ? Math.min(b.investido, b.vale) : b.investido;
+      const y1 = y(ac + cheio), y0 = y(ac);
+      segs += `<rect class="seg s-${b.k}" x="${xInv}" y="${y1}" width="${wInv}" height="${Math.max(0.5, y0 - y1)}"/>`;
+      rot += etiqueta(xInv, wInv, ac + cheio, ac, curto(b.investido), 'seg-inv');
+      if (temValor) {
+        const dif = b.vale - b.investido;
+        if (dif >= 1) {
+          const v1 = y(ac + b.vale);
+          segs += `<rect class="seg s-valoriz" x="${xInv}" y="${v1}" width="${wInv}" height="${Math.max(0.5, y1 - v1)}"/>`;
+          rot += etiqueta(xInv, wInv, ac + b.vale, ac + cheio, `+${curto(dif)}`, 'seg-val');
+        } else if (dif <= -1) {
+          const v1 = y(ac + b.investido);
+          segs += `<rect class="seg s-perda" x="${xInv}" y="${v1}" width="${wInv}" height="${Math.max(0.5, y1 - v1)}"/>`;
+          rot += etiqueta(xInv, wInv, ac + b.investido, ac + cheio, `−${curto(-dif)}`, 'seg-neg');
+        }
+      }
+      ac += temValor ? Math.max(b.investido, b.vale) : b.investido;
+    }
+    const yTopo = y(ac), yBase = y(0);
+    const clip = ac ? `<clipPath id="sb${i}"><rect x="${xInv}" y="${yTopo}" width="${wInv}" height="${yBase - yTopo + 8}" rx="6"/></clipPath>` : '';
+    let prov = '';
+    const pv = provDe(g);
+    if (pv > 0.005) {
+      let ap = 0;
+      for (const t of ORDEM_PROV_SIM) {
+        const v = tiposDe(g)[t] || 0;
+        if (v <= 0) continue;
+        const p1 = y(ap + v), p0 = y(ap);
+        prov += `<rect class="seg pv-${t === 'provento' ? 'outro' : t}" x="${xProv}" y="${p1}" width="${wProv}" height="${Math.max(0.5, p0 - p1)}"/>`;
+        ap += v;
+      }
+      const yp = y(pv);
+      prov = `<clipPath id="sp${i}"><rect x="${xProv}" y="${yp}" width="${wProv}" height="${yBase - yp + 6}" rx="4"/></clipPath><g clip-path="url(#sp${i})">${prov}</g>`;
+      if (duas && slot >= 60) rot += `<text class="seg-rot seg-provtot" x="${xProv + wProv / 2}" y="${yp - 4}" text-anchor="middle">${curto(pv)}</text>`;
+    }
+    const topoBarra = Math.min(ac ? yTopo : H, pv > 0.005 ? y(pv) - 12 : H, acum ? y(g.valorFim) - 7 : H);
+    const [tx, anc] = slot >= 112 ? [cx, 'middle'] : i === 0 ? [i * slot + 4, 'start'] : i === n - 1 ? [(i + 1) * slot - 4, 'end'] : [cx, 'middle'];
+    const inv = (acum ? Object.values(g.acum.aplicado) : Object.values(g.aplicado)).reduce((s2, v) => s2 + v, 0);
+    let topoTxt = '';
+    if (acum) {
+      const ganho = g.valorFim - g.acum.bolso;
+      topoTxt = `<text class="v" x="${tx}" y="${topoBarra - 22}" text-anchor="${anc}">${R(g.valorFim)}</text><text class="v2 ${ganho >= 0 ? 'ganho' : 'perda'}" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">${ganho >= 0 ? '+' : '−'} ${R(Math.abs(ganho))}</text>`;
+    } else if (inv) topoTxt = `<text class="v" x="${tx}" y="${topoBarra - 8}" text-anchor="${anc}">${R(inv)}</text>`;
+    return `<g class="slot ${i === sel ? 'sel' : ''}" data-g-slot="${i}">
+      <rect class="alvo" x="${i * slot + 3}" y="4" width="${slot - 6}" height="${H - 8}" rx="10"/>
+      ${clip}<g clip-path="url(#sb${i})">${segs}</g>${prov}${rot}${topoTxt}
+      <text class="x" x="${cx}" y="${H - 10}" text-anchor="middle">${per === 'ano' ? g.chave : mesCurto(g.chave)}</text>
+    </g>`;
+  }).join('');
+  const pts = acum ? linhas.map((g, i) => [i * slot + slot / 2, y(g.valorFim)]) : [];
+  const linhaMerc = acum ? `<polyline class="linha-merc" points="${pts.map((p2) => p2.join(',')).join(' ')}"/>${pts.map((p2, i) => `<circle class="ponto-merc ${i === sel ? 'sel' : ''}" cx="${p2[0]}" cy="${p2[1]}" r="${i === sel ? 5 : 3}"/>`).join('')}` : '';
+  const scroll = box.scrollLeft;
+  box.innerHTML = `<svg class="grafico" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Investido${temProv ? ' e proventos' : ''} por ${per === 'mes' ? 'mês' : 'ano'}${acum ? ', acumulado' : ''}">
+    <defs>
+      <pattern id="hach-valoriz" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hach-fundo-alta" width="6" height="6"/><line class="hach-linha-alta" x1="0" y1="0" x2="0" y2="6"/></pattern>
+      <pattern id="hach-perda" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hach-fundo-baixa" width="6" height="6"/><line class="hach-linha-baixa" x1="0" y1="0" x2="0" y2="6"/></pattern>
+    </defs>
+    ${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}${linhaMerc}</svg>`;
+  box.scrollLeft = fim ? box.scrollWidth : scroll;
+  // legenda
+  const tiposPresentes = ORDEM_PROV_SIM.filter((t) => linhas.some((g) => (tiposDe(g)[t] || 0) > 0));
+  $('#sim-barras-leg').innerHTML = [
+    ...pilha.map((k) => `<span><i class="sw s-${k}"></i>${NOME_CLASSE_SIM[k]}</span>`),
+    acum ? '<span><i class="sw s-valoriz"></i>valorização</span><span><i class="sw s-perda-sw"></i>desvalorização</span><span><i class="sw sim-sw-linha"></i>valor da carteira</span>' : '',
+    ...tiposPresentes.map((t) => `<span>${swProv(t)}${t === 'provento' ? 'proventos' : TIPOS_PROV_SIM[t].toLowerCase()}</span>`),
+  ].join('');
+  // detalhe da barra escolhida, como no Histórico
+  const g = linhas[sel];
+  if (!g) { $('#sim-barras-det').innerHTML = ''; return; }
+  const nomePer = per === 'ano' ? g.chave : nomeMesAno(g.chave).replace(/^./, (c) => c.toUpperCase());
+  const itensProv = (tipos) => ORDEM_PROV_SIM.filter((t) => (tipos[t] || 0) > 0.005).map((t) => `<span>${swProv(t)}${t === 'provento' ? 'Sem tipo' : TIPOS_PROV_SIM[t]}<b>${R(tipos[t])}</b></span>`).join('');
+  const itensClasse = (apl) => PILHA.filter((k) => (apl[k] || 0) > 0.005).map((k) => `<span><i class="sw s-${k}"></i>${NOME_CLASSE_SIM[k]}<b>${R(apl[k])}</b></span>`).join('');
+  const L2 = (rot, sub, val, cls = '') => `<div class="conta-l ${cls}"><span>${rot}${sub ? `<small>${sub}</small>` : ''}</span><b class="num">${val}</b></div>`;
+  if (acum) {
+    const invS = Object.values(g.acum.aplicado).reduce((s2, v) => s2 + v, 0);
+    const posicao = Object.values(g.valorClasse).reduce((s2, v) => s2 + v, 0);
+    const valoriz = posicao - invS;
+    const ganho = g.valorFim - g.acum.bolso;
+    $('#sim-barras-det').innerHTML = `<div class="conta">
+      <div class="conta-cab"><b>Até ${nomePer}</b><span class="apagado">${esc(cfg.carteiras[ci].nome)}</span></div>
+      <div class="conta-linhas">
+        ${L2('Do seu bolso', 'aportes', R(g.acum.bolso))}
+        ${g.acum.reinvestido > 0.005 ? L2('Proventos reinvestidos', 'entraram nas compras', `<span class="var-alta">+ ${R(g.acum.reinvestido)}</span>`) : ''}
+        ${L2('Investido', 'com as taxas', R(invS), g.acum.reinvestido > 0.005 ? 'conta-sub' : '')}
+        ${L2(r.linhas.every((l) => l.tipo !== 'bolsa') ? 'Rendimento' : 'Valorização', sel === n - 1 ? 'pelo preço de hoje' : `pelo preço no fim de ${per === 'ano' ? g.chave : mesCurto(g.chave)}`, `<span class="${clsV(valoriz)}">${sinalR(valoriz)}</span>`)}
+        ${g.valorFim - posicao > 0.5 ? L2('Dinheiro parado', 'sobra das cotas inteiras e proventos esperando o aporte', R(g.valorFim - posicao)) : ''}
+        <div class="conta-l conta-total"><span>Valor da carteira</span><b class="num">${R(g.valorFim)}</b></div>
+        <div class="conta-ret"><span>Ganho total<small>valorização + proventos ${R(g.acum.proventos)}, sobre o que saiu do bolso</small></span><b class="${clsV(ganho)}">${sinalR(ganho)} · ${pct(g.acum.bolso ? ganho / g.acum.bolso : null)}</b></div>
+      </div>
+      <div class="det-itens">${itensClasse(g.acum.aplicado)}${itensProv(g.acum.provTipos)}</div>
+    </div>`;
+  } else {
+    $('#sim-barras-det').innerHTML = `<div class="conta">
+      <div class="conta-cab"><b>${nomePer}</b><span class="apagado">${esc(cfg.carteiras[ci].nome)}</span></div>
+      <div class="conta-linhas">
+        ${L2('Do seu bolso', '', R(g.bolso))}
+        ${g.reinvestido > 0.005 ? L2('Proventos reinvestidos', '', `<span class="var-alta">+ ${R(g.reinvestido)}</span>`) : ''}
+        ${L2('Proventos recebidos', 'caíram na conta neste período', g.proventos > 0.005 ? `<span class="var-alta">+ ${R(g.proventos)}</span>` : '—')}
+        <div class="conta-ret"><span>Ganho no período<small>valor no fim − valor no início − o que saiu do bolso</small></span><b class="${clsV(g.ganho)}">${sinalR(g.ganho)}${g.ganhoPct != null ? ` · ${pct(g.ganhoPct)}` : ''}</b></div>
+      </div>
+      <div class="det-itens">${itensClasse(g.aplicado)}${itensProv(g.provTipos)}</div>
+    </div>`;
+  }
+}
+
+
+function htmlGraficoSim(largura) {
+  const { res, cfg } = SIM_RES;
+  const W = Math.max(300, Math.round(largura)), H = Math.round(Math.min(300, Math.max(210, W * 0.45)));
+  const m = { l: 8, r: 8, t: 14, b: 26 };
+  const serie = res[0].serie;
+  const n = serie.length;
+  const maxV = Math.max(...res.flatMap((r) => r.serie.map((p) => Math.max(p.total, p.bolso))));
+  const passo = niceStep(maxV / 4);
+  const topo = Math.ceil(maxV / passo) * passo || 1;
+  const x = (i) => m.l + (n <= 1 ? 0 : (i / (n - 1)) * (W - m.l - m.r));
+  const y = (v) => m.t + (1 - v / topo) * (H - m.t - m.b);
+  const linha = (pts) => pts.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
+  const grade = [];
+  for (let v = passo; v <= topo + 1e-6; v += passo) grade.push(`<line class="grade" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l + 2}" y="${y(v) - 4}">${compacto(v)}</text>`);
+  const anos = [];
+  serie.forEach((p, i) => { if (i === 0 || p.data.slice(0, 4) !== serie[i - 1].data.slice(0, 4)) anos.push(`<text class="x" x="${x(i)}" y="${H - 8}" text-anchor="${i === 0 ? 'start' : 'middle'}">${i === 0 ? mesCurto(p.data.slice(0, 7)) : p.data.slice(0, 4)}</text>`); });
+  return `<svg class="grafico sim-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Evolução do valor de cada carteira e do que saiu do bolso">
+    ${grade.join('')}<line class="base" x1="${m.l}" x2="${W - m.r}" y1="${y(0)}" y2="${y(0)}"/>${anos.join('')}
+    ${res.map((r, i) => `<path class="sim-l-inv sim-li-${CORES_SIM[i]}" d="${linha(r.serie.map((p) => p.bolso))}"/>`).join('')}
+    ${res.map((r, i) => `<path class="sim-l sim-l-${CORES_SIM[i]}" d="${linha(r.serie.map((p) => p.total))}"/>`).join('')}
+    ${res.map((r, i) => `<circle class="sim-pt sim-pt-${CORES_SIM[i]}" r="4.5" cx="${x(n - 1)}" cy="${y(r.total)}"/>`).join('')}
+    <g class="sim-mira" hidden><line class="sim-mira-l" y1="${m.t}" y2="${H - m.b}"/>${res.map((r, i) => `<circle class="sim-pt sim-pt-${CORES_SIM[i]}" r="4.5"/>`).join('')}${res.map((r, i) => `<circle class="sim-pt sim-pt-inv sim-pi-${CORES_SIM[i]}" r="3.5"/>`).join('')}</g>
+    <rect class="sim-alvo" x="0" y="0" width="${W}" height="${H}" fill="transparent"/>
+  </svg><div class="sim-dica" hidden></div>`;
+}
+
+function desenharGraficoSim() {
+  const box = $('#sim-graf');
+  if (!box || !SIM_RES) return;
+  box.innerHTML = htmlGraficoSim(box.clientWidth || 600);
+  const svg = $('svg', box), dica = $('.sim-dica', box), mira = $('.sim-mira', box);
+  const { res, cfg } = SIM_RES;
+  const serie = res[0].serie, n = serie.length;
+  const W = svg.viewBox.baseVal.width, H = svg.viewBox.baseVal.height;
+  const maxV = Math.max(...res.flatMap((r) => r.serie.map((p) => Math.max(p.total, p.bolso))));
+  const passo = niceStep(maxV / 4);
+  const topo = Math.ceil(maxV / passo) * passo || 1;
+  const x = (i) => 8 + (n <= 1 ? 0 : (i / (n - 1)) * (W - 16));
+  const y = (v) => 14 + (1 - v / topo) * (H - 40);
+  const mostrar = (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.clientX - r.left) / r.width) * W;
+    const i = Math.max(0, Math.min(n - 1, Math.round(((px - 8) / (W - 16)) * (n - 1))));
+    mira.hidden = false;
+    const l = $('.sim-mira-l', mira); l.setAttribute('x1', x(i)); l.setAttribute('x2', x(i));
+    const pts = mira.querySelectorAll('circle');
+    res.forEach((rr, k) => { pts[k].setAttribute('cx', x(i)); pts[k].setAttribute('cy', y(rr.serie[i].total)); });
+    res.forEach((rr, k) => { pts[res.length + k].setAttribute('cx', x(i)); pts[res.length + k].setAttribute('cy', y(rr.serie[i].bolso)); });
+    dica.hidden = false;
+    dica.innerHTML = `<b>${dataBR(serie[i].data)}</b>${res.map((rr, k) => `<span><i class="sw sim-sw-${CORES_SIM[k]}"></i>${esc(cfg.carteiras[k].nome)} <b class="num">${R(rr.serie[i].total)}</b></span><span class="sim-dica-sub">saiu do bolso <b class="num">${R(rr.serie[i].bolso)}</b></span>${rr.serie[i].proventos > 0.005 ? `<span class="sim-dica-sub">proventos até aqui <b class="num">${R(rr.serie[i].proventos)}</b></span>` : ''}`).join('')}`;
+    const esq = (x(i) / W) * r.width;
+    dica.style.left = `${Math.min(Math.max(0, esq - dica.offsetWidth / 2), r.width - dica.offsetWidth)}px`;
+  };
+  const esconder = () => { mira.hidden = true; dica.hidden = true; };
+  svg.addEventListener('pointermove', mostrar);
+  svg.addEventListener('pointerdown', mostrar);
+  svg.addEventListener('pointerleave', esconder);
+}
+
+
 const FILTROS_DIA = [['tudo', 'Tudo'], ['compra', 'Compras'], ['provento', 'Proventos']];
 
 function htmlCardSim(o, modoPreco) {
@@ -2013,61 +2301,66 @@ function htmlDiaSim(r) {
     }).join('') || '<p class="dica">Nada neste filtro.</p>'}`;
 }
 
+
 function htmlPeriodosSim() {
   const { res, cfg } = SIM_RES;
   const ci = Math.min(SIM_VISTA.cart, res.length - 1);
   const r = res[ci];
   const per = SIM_VISTA.per;
-  const cls = (v) => (v >= 0 ? 'var-alta' : 'var-baixa');
-  const sinal = (v) => `${v >= 0 ? '+' : '−'} ${R(Math.abs(v))}`;
   const temRF = r.linhas.some((l) => l.tipo !== 'bolsa');
   const temBolsa = r.linhas.some((l) => l.tipo === 'bolsa');
   const controles = `<div class="graf-controles">
-    ${res.length > 1 ? `<div class="seg" role="group" aria-label="Carteira">${res.map((x, i) => `<button type="button" data-sim-cart="${i}" aria-pressed="${i === ci}"><i class="sw sim-sw-${CORES_SIM[i]}"></i> ${esc(cfg.carteiras[i].nome)}</button>`).join('')}</div>` : ''}
+    ${res.length > 1 ? `<div class="seg" role="group" aria-label="Carteira">${res.map((x, i) => `<button type="button" data-sim-cart="${i}" aria-pressed="${i === ci}"><i class="sw sim-sw-${CORES_SIM[i]}"></i> ${esc(cfg.carteiras[i].nome.replace('Carteira ', ''))}</button>`).join('')}</div>` : ''}
     <div class="seg" role="group" aria-label="Período">${[['dia', 'Dia'], ['mes', 'Mês'], ['ano', 'Ano'], ['tudo', 'Tudo']].map(([k, n]) => `<button type="button" data-sim-per="${k}" aria-pressed="${per === k}">${n}</button>`).join('')}</div>
   </div>`;
   if (per === 'dia') {
     return `<section class="bloco sim-periodos">
-      <div class="bloco-cab"><h2 class="sim-h">Operações dia a dia</h2>${controles}</div>
+      <div class="bloco-cab"><h2 class="sim-h">Operações dia a dia${res.length > 1 ? ` <span class="graf-ativo-nome">· ${esc(cfg.carteiras[ci].nome)}</span>` : ''}</h2>${controles}</div>
       ${htmlDiaSim(r)}
     </section>`;
   }
   const linhas = resumoPorPeriodoSim(r.porMes, per).reverse(); // mais recente primeiro
-  const rotulo = (g) => (per === 'ano' ? g.chave : per === 'tudo' ? `${mesCurto(g.de)} a ${mesCurto(g.ate)}` : mesCurto(g.chave).replace(/^./, (c) => c.toUpperCase()));
+  const rotulo = (g) => (per === 'ano' ? g.chave : per === 'tudo' ? `${mesCurto(g.de)} a ${mesCurto(g.ate)}` : nomeMesAno(g.chave).replace(/^./, (c) => c.toUpperCase()));
   const tot = resumoPorPeriodoSim(r.porMes, 'tudo')[0];
   const subProv = (g) => ORDEM_PROV_SIM.filter((t) => (g.provTipos[t] || 0) > 0.005).map((t) => `${t === 'provento' ? 'sem tipo' : TIPOS_PROV_SIM[t]} ${R(g.provTipos[t])}`).join(' · ');
+  const nomeVal = temRF && !temBolsa ? 'Rendimento' : 'Valorização';
   const cel = (g) => `
-    <td class="r num">${R(g.bolso)}${g.reinvestido > 0.005 ? `<small class="sim-sub">+ ${R(g.reinvestido)} de proventos</small>` : ''}</td>
-    <td class="r num ${g.proventos > 0.005 ? 'var-alta' : ''}">${g.proventos > 0.005 ? `+ ${R(g.proventos)}<small class="sim-sub">${subProv(g)}</small>` : '—'}</td>
-    <td class="r num ${cls(g.valorizacao)}">${sinal(g.valorizacao)}${temRF && temBolsa ? `<small class="sim-sub">cotas ${sinal(g.valorizacaoBolsa)} · renda fixa ${sinal(g.rendimentoRF)}</small>` : ''}</td>
-    <td class="r num ${cls(g.ganho)}"><b>${sinal(g.ganho)}</b>${g.ganhoPct != null ? `<small class="sim-sub">${pct(g.ganhoPct)}</small>` : ''}</td>
-    <td class="r num">${R(g.valorFim)}</td>`;
-  return `<section class="bloco sim-periodos">
-    <div class="bloco-cab"><h2 class="sim-h">Por período</h2>${controles}</div>
-    <div class="tabela-wrap"><table class="sim-tab">
-      <thead><tr><th>${per === 'mes' ? 'Mês' : per === 'ano' ? 'Ano' : 'Período'}</th><th class="r">Do bolso</th><th class="r">Proventos</th><th class="r">${temRF && !temBolsa ? 'Rendimento' : 'Valorização'}</th><th class="r">Ganho</th><th class="r">Valor no fim</th></tr></thead>
-      <tbody>${linhas.map((g) => `<tr><td><b>${esc(rotulo(g))}</b></td>${cel(g)}</tr>`).join('')}</tbody>
-      ${per !== 'tudo' && linhas.length > 1 ? `<tfoot><tr><td>Total</td>${cel(tot)}</tr></tfoot>` : ''}
-    </table></div>
-    <p class="dica">Ganho do período = valor no fim − valor no início − o que saiu do bolso no período = valorização + proventos recebidos. Proventos contam no mês em que foram pagos. O % é sobre o que já havia mais o que entrou do bolso no período.</p>
-  </section>`;
+    <td class="r num" data-rot="Do bolso">${R(g.bolso)}${g.reinvestido > 0.005 ? `<small class="sim-sub">+ ${R(g.reinvestido)} de proventos</small>` : ''}</td>
+    ${temBolsa ? `<td class="r num ${g.proventos > 0.005 ? 'var-alta' : ''}" data-rot="Proventos">${g.proventos > 0.005 ? `+ ${R(g.proventos)}<small class="sim-sub">${subProv(g)}</small>` : '—'}</td>` : ''}
+    <td class="r num ${clsV(g.valorizacao)}" data-rot="${nomeVal}">${sinalR(g.valorizacao)}${temRF && temBolsa ? `<small class="sim-sub">cotas ${sinalR(g.valorizacaoBolsa)} · renda fixa ${sinalR(g.rendimentoRF)}</small>` : ''}</td>
+    <td class="r num ${clsV(g.ganho)}" data-rot="Ganho"><b>${sinalR(g.ganho)}</b>${g.ganhoPct != null ? `<small class="sim-sub">${pct(g.ganhoPct)}</small>` : ''}</td>
+    <td class="r num" data-rot="Valor no fim">${R(g.valorFim)}</td>`;
+  return resp(`<section class="bloco sim-periodos">
+    <div class="bloco-cab"><h2 class="sim-h">Por período${res.length > 1 ? ` <span class="graf-ativo-nome">· ${esc(cfg.carteiras[ci].nome)}</span>` : ''}</h2>${controles}</div>
+    ${(() => {
+      const cab = `<thead><tr><th>${per === 'mes' ? 'Mês' : per === 'ano' ? 'Ano' : 'Período'}</th><th class="r">Do bolso</th>${temBolsa ? '<th class="r">Proventos</th>' : ''}<th class="r">${nomeVal}</th><th class="r">Ganho</th><th class="r">Valor no fim</th></tr></thead>`;
+      const corpo = (xs) => `<tbody>${xs.map((g) => `<tr><td class="resp-tit"><b>${esc(rotulo(g))}</b></td>${cel(g)}</tr>`).join('')}</tbody>`;
+      const total = per !== 'tudo' && linhas.length > 1 ? `<tfoot><tr><td class="resp-tit"><b>Total</b></td>${cel(tot)}</tr></tfoot>` : '';
+      if (per !== 'mes') return `<table class="resp sim-tab">${cab}${corpo(linhas)}${total}</table>`;
+      // por mês: um grupo por ano, o mais recente aberto
+      const anos = new Map(resumoPorPeriodoSim(r.porMes, 'ano').map((g) => [g.chave, g]));
+      const porAno = groupBy(linhas, (g) => g.chave.slice(0, 4));
+      return [...porAno.entries()].map(([ano, xs], i) => {
+        const ga = anos.get(ano);
+        return `<details class="mes-grupo sim-ano" ${i === 0 ? 'open' : ''}>
+          <summary class="mes-cab"><span>${ano}</span><span class="sim-mes-res"><small>ganho <b class="${clsV(ga.ganho)}">${sinalR(ga.ganho)}</b> · ${xs.length} ${xs.length === 1 ? 'mês' : 'meses'}</small></span></summary>
+          <table class="resp sim-tab">${cab}${corpo(xs)}</table>
+        </details>`;
+      }).join('') + (total ? `<table class="resp sim-tab sim-total-tab">${cab}${total}</table>` : '');
+    })()}
+    <p class="dica">Ganho do período = valor no fim − valor no início − o que saiu do bolso no período = ${nomeVal.toLowerCase()}${temBolsa ? ' + proventos recebidos' : ''}. ${temBolsa ? 'Proventos contam no mês em que foram pagos. ' : ''}O % é sobre o que já havia mais o que entrou do bolso no período.</p>
+  </section>`);
 }
 
 function renderSimular() {
   return `
-    <section class="bloco">
+    <section class="bloco sim-config">
       <div class="bloco-cab"><h2>Simular aportes</h2><small>e se eu tivesse investido todo mês desde…</small></div>
-      <div class="campos">
-        <label class="campo"><span>Desde</span><input type="month" id="sim-inicio" value="${esc(SIM.inicio)}" min="2015-01" max="${mesDe(hojeISO())}"><span class="sub">aporte no 1º dia útil de cada mês, até hoje</span></label>
-        <label class="campo"><span>Aporte mensal</span><input id="sim-aporte" class="num" inputmode="decimal" value="${Number(SIM.aporte).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"><span class="sub"></span></label>
-      </div>
-      <div class="campos">
-        <div class="campo campo-seg"><span>Proventos</span>
-          <div class="seg sim-seg" role="group" aria-label="Proventos">${Object.entries(MODOS_PROV).map(([k, [n]]) => `<button type="button" data-modo-prov="${k}" aria-pressed="${SIM.proventos === k}">${n}</button>`).join('')}</div>
-          <span class="sub">${MODOS_PROV[SIM.proventos][1]}</span></div>
-        <div class="campo campo-seg"><span>Preço de compra</span>
-          <div class="seg sim-seg" role="group" aria-label="Preço de compra">${Object.entries(PRECOS_COMPRA).map(([k, [n]]) => `<button type="button" data-preco="${k}" aria-pressed="${SIM.preco === k}">${n}</button>`).join('')}</div>
-          <span class="sub">${PRECOS_COMPRA[SIM.preco][1]}</span></div>
+      <div class="sim-config-linha">
+        <label class="campo"><span>Desde</span><input type="month" id="sim-inicio" value="${esc(SIM.inicio)}" min="2015-01" max="${mesDe(hojeISO())}"><span class="sub">um aporte no 1º dia útil de cada mês, até hoje</span></label>
+        <div class="campo"><span>Simular</span>
+          <div class="seg" role="group" aria-label="Quantas carteiras">${[[false, 'Uma carteira'], [true, 'Comparar duas']].map(([k, n]) => `<button type="button" data-comparar="${k}" aria-pressed="${Boolean(SIM.comparar) === k}">${n}</button>`).join('')}</div>
+          <span class="sub">${SIM.comparar ? 'monte as duas e veja qual teria rendido mais' : 'só a Carteira A'}</span></div>
       </div>
     </section>
     <div class="sim-carteiras">
@@ -2075,70 +2368,10 @@ function renderSimular() {
       ${SIM.comparar ? htmlCarteiraSim(SIM.carteiras[1], 1) : ''}
     </div>
     <div class="sim-acoes">
-      <button type="button" class="btn" id="sim-comparar">${SIM.comparar ? 'Simular só a Carteira A' : 'Comparar com outra carteira'}</button>
-      <button type="button" class="btn prim" id="sim-rodar" ${simulando ? 'disabled' : ''}>${simulando ? 'Buscando o histórico…' : 'Simular'}</button>
+      <button type="button" class="btn prim" id="sim-rodar" ${simulando ? 'disabled' : ''}>${simulando ? 'Buscando o histórico…' : SIM_RES ? 'Simular de novo' : 'Simular'}</button>
     </div>
     ${!N.nuvem.servidor && N.nuvem.estado !== 'verificando' ? '<p class="aviso">O simulador busca o histórico pelo Worker da Cloudflare: abra o app pelo endereço publicado.</p>' : ''}
     <div id="sim-saida">${htmlResultadoSim()}</div>`;
-}
-
-function htmlGraficoSim(largura) {
-  const { res, cfg } = SIM_RES;
-  const W = Math.max(300, Math.round(largura)), H = Math.round(Math.min(300, Math.max(210, W * 0.45)));
-  const m = { l: 8, r: 8, t: 14, b: 26 };
-  const serie = res[0].serie;
-  const n = serie.length;
-  const maxV = Math.max(...res.flatMap((r) => r.serie.map((p) => Math.max(p.total, p.bolso))));
-  const passo = niceStep(maxV / 4);
-  const topo = Math.ceil(maxV / passo) * passo || 1;
-  const x = (i) => m.l + (n <= 1 ? 0 : (i / (n - 1)) * (W - m.l - m.r));
-  const y = (v) => m.t + (1 - v / topo) * (H - m.t - m.b);
-  const linha = (pts) => pts.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
-  const grade = [];
-  for (let v = passo; v <= topo + 1e-6; v += passo) grade.push(`<line class="grade" x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}"/><text x="${m.l + 2}" y="${y(v) - 4}">${compacto(v)}</text>`);
-  const anos = [];
-  serie.forEach((p, i) => { if (i === 0 || p.data.slice(0, 4) !== serie[i - 1].data.slice(0, 4)) anos.push(`<text class="x" x="${x(i)}" y="${H - 8}" text-anchor="${i === 0 ? 'start' : 'middle'}">${i === 0 ? mesCurto(p.data.slice(0, 7)) : p.data.slice(0, 4)}</text>`); });
-  return `<svg class="grafico sim-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Evolução do valor de cada carteira e do que saiu do bolso">
-    ${grade.join('')}<line class="base" x1="${m.l}" x2="${W - m.r}" y1="${y(0)}" y2="${y(0)}"/>${anos.join('')}
-    ${res.map((r, i) => `<path class="sim-l-inv sim-li-${CORES_SIM[i]}" d="${linha(r.serie.map((p) => p.bolso))}"/>`).join('')}
-    ${res.map((r, i) => `<path class="sim-l sim-l-${CORES_SIM[i]}" d="${linha(r.serie.map((p) => p.total))}"/>`).join('')}
-    ${res.map((r, i) => `<circle class="sim-pt sim-pt-${CORES_SIM[i]}" r="4.5" cx="${x(n - 1)}" cy="${y(r.total)}"/>`).join('')}
-    <g class="sim-mira" hidden><line class="sim-mira-l" y1="${m.t}" y2="${H - m.b}"/>${res.map((r, i) => `<circle class="sim-pt sim-pt-${CORES_SIM[i]}" r="4.5"/>`).join('')}${res.map((r, i) => `<circle class="sim-pt sim-pt-inv sim-pi-${CORES_SIM[i]}" r="3.5"/>`).join('')}</g>
-    <rect class="sim-alvo" x="0" y="0" width="${W}" height="${H}" fill="transparent"/>
-  </svg><div class="sim-dica" hidden></div>`;
-}
-
-function desenharGraficoSim() {
-  const box = $('#sim-graf');
-  if (!box || !SIM_RES) return;
-  box.innerHTML = htmlGraficoSim(box.clientWidth || 600);
-  const svg = $('svg', box), dica = $('.sim-dica', box), mira = $('.sim-mira', box);
-  const { res, cfg } = SIM_RES;
-  const serie = res[0].serie, n = serie.length;
-  const W = svg.viewBox.baseVal.width, H = svg.viewBox.baseVal.height;
-  const maxV = Math.max(...res.flatMap((r) => r.serie.map((p) => Math.max(p.total, p.bolso))));
-  const passo = niceStep(maxV / 4);
-  const topo = Math.ceil(maxV / passo) * passo || 1;
-  const x = (i) => 8 + (n <= 1 ? 0 : (i / (n - 1)) * (W - 16));
-  const y = (v) => 14 + (1 - v / topo) * (H - 40);
-  const mostrar = (ev) => {
-    const r = svg.getBoundingClientRect();
-    const px = ((ev.clientX - r.left) / r.width) * W;
-    const i = Math.max(0, Math.min(n - 1, Math.round(((px - 8) / (W - 16)) * (n - 1))));
-    mira.hidden = false;
-    const l = $('.sim-mira-l', mira); l.setAttribute('x1', x(i)); l.setAttribute('x2', x(i));
-    const pts = mira.querySelectorAll('circle');
-    res.forEach((rr, k) => { pts[k].setAttribute('cx', x(i)); pts[k].setAttribute('cy', y(rr.serie[i].total)); });
-    res.forEach((rr, k) => { pts[res.length + k].setAttribute('cx', x(i)); pts[res.length + k].setAttribute('cy', y(rr.serie[i].bolso)); });
-    dica.hidden = false;
-    dica.innerHTML = `<b>${dataBR(serie[i].data)}</b>${res.map((rr, k) => `<span><i class="sw sim-sw-${CORES_SIM[k]}"></i>${esc(cfg.carteiras[k].nome)} <b class="num">${R(rr.serie[i].total)}</b></span><span class="sim-dica-sub">saiu do bolso <b class="num">${R(rr.serie[i].bolso)}</b></span>${rr.serie[i].proventos > 0.005 ? `<span class="sim-dica-sub">proventos até aqui <b class="num">${R(rr.serie[i].proventos)}</b></span>` : ''}`).join('')}`;
-    const esq = (x(i) / W) * r.width;
-    dica.style.left = `${Math.min(Math.max(0, esq - dica.offsetWidth / 2), r.width - dica.offsetWidth)}px`;
-  };
-  const esconder = () => { mira.hidden = true; dica.hidden = true; };
-  svg.addEventListener('pointermove', mostrar);
-  svg.addEventListener('pointerdown', mostrar);
-  svg.addEventListener('pointerleave', esconder);
 }
 
 async function rodarSimulacao() {
@@ -2156,8 +2389,8 @@ async function rodarSimulacao() {
       }
     }
     if (!c.itens.length) { toast(`${c.nome}: coloque um percentual em pelo menos um investimento.`); return; }
+    if (!(Number(c.aporte) > 0)) { toast(`${c.nome}: informe o aporte por mês.`); return; }
   }
-  if (!(cfg.aporte > 0)) { toast('Informe o valor do aporte mensal.'); return; }
   if (!/^\d{4}-\d{2}$/.test(cfg.inicio) || cfg.inicio > mesDe(hojeISO())) { toast('Escolha o mês de início.'); return; }
 
   simulando = true; render();
@@ -2171,7 +2404,10 @@ async function rodarSimulacao() {
       Promise.all(series.map((s) => apiSim(`sim/indice?s=${s}&de=${de}`).catch((e) => { throw new Error(`taxa ${s.toUpperCase()}: ${e.message}`); }))),
     ]);
     const dados = { precos: Object.fromEntries(precos.map((p) => [p.ticker, p])), indices: Object.fromEntries(indices.map((x) => [x.serie, x.dados])) };
-    SIM_RES = { cfg, res: cfg.carteiras.map((c) => simular({ inicio: cfg.inicio, aporte: cfg.aporte, proventos: cfg.proventos, preco: cfg.preco, itens: c.itens }, dados)) };
+    SIM_RES = { cfg, res: cfg.carteiras.map((c) => simular({ inicio: cfg.inicio, aporte: Number(c.aporte), proventos: c.proventos, preco: c.preco, itens: c.itens }, dados)) };
+    SIM_G.sel = null;
+    if (SIM_RES.res.length < 2 && SIM_G.cart === 'comp') SIM_G.cart = 0;
+    SIM_VISTA.cart = Math.min(SIM_VISTA.cart, SIM_RES.res.length - 1);
   } catch (e) {
     toast(`Não deu para simular: ${e.message}`);
   } finally {
@@ -2180,12 +2416,17 @@ async function rodarSimulacao() {
   }
 }
 
+function desenharGraficosSim({ fim = true } = {}) {
+  if (!SIM_RES) return;
+  if (SIM_G.cart === 'comp' && SIM_RES.res.length > 1) desenharGraficoSim();
+  else desenharBarrasSim({ fim });
+}
+
 function ligarSimular() {
   const raiz = $('#conteudo');
   const redesenharCarteira = (ci) => {
     const velho = raiz.querySelector(`[data-carteira="${ci}"]`);
-    if (!velho) return;
-    velho.outerHTML = htmlCarteiraSim(SIM.carteiras[ci], ci);
+    if (velho) velho.outerHTML = htmlCarteiraSim(SIM.carteiras[ci], ci);
   };
   const atualizaSoma = (ci) => {
     const el = raiz.querySelector(`[data-soma="${ci}"]`);
@@ -2195,9 +2436,14 @@ function ligarSimular() {
     el.textContent = ok ? 'soma 100%' : `soma ${fmtPct0(soma)} — o app divide na proporção`;
     el.classList.toggle('var-baixa', !ok);
   };
+  const trocarGrafico = (fim) => {
+    const velho = raiz.querySelector('.sim-grafico');
+    if (velho) velho.outerHTML = htmlGraficoBarrasSim();
+    desenharGraficosSim({ fim });
+  };
   raiz.addEventListener('input', (e) => {
     const t = e.target;
-    if (t.id === 'sim-aporte') { SIM.aporte = num(t.value) || 0; salvarSim(); return; }
+    if (t.dataset.aporte != null) { SIM.carteiras[t.dataset.aporte].aporte = num(t.value) || 0; salvarSim(); return; }
     if (t.id === 'sim-inicio') { if (t.value) { SIM.inicio = t.value; salvarSim(); } return; }
     const row = t.closest('.sim-item');
     if (!row || t.dataset.campo === 'tipo') return;
@@ -2213,10 +2459,12 @@ function ligarSimular() {
     const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
     it.tipo = t.value;
     if (TIPOS_SIM[it.tipo].taxa) it.taxa = TIPOS_SIM[it.tipo].taxa.padrao; else delete it.taxa;
-    if (it.tipo !== 'bolsa') delete it.ticker;
+    if (it.tipo !== 'bolsa') { delete it.ticker; delete it.nome; delete it.classe; }
     salvarSim(); redesenharCarteira(row.dataset.c);
   });
   raiz.addEventListener('click', (e) => {
+    const slot = e.target.closest('[data-g-slot]');
+    if (slot) { SIM_G.sel = Number(slot.dataset.gSlot); desenharBarrasSim(); return; }
     const t = e.target.closest('button');
     if (!t) return;
     if (t.hasAttribute('data-escolher')) {
@@ -2225,7 +2473,12 @@ function ligarSimular() {
       abrirEscolherAtivo((a) => { it.ticker = a.ticker; it.nome = a.nome; it.classe = a.classe; salvarSim(); redesenharCarteira(row.dataset.c); });
       return;
     }
-    if (t.dataset.preco) { SIM.preco = t.dataset.preco; salvarSim(); render(); return; }
+    if (t.dataset.modoProv) { SIM.carteiras[t.dataset.c].proventos = t.dataset.modoProv; salvarSim(); redesenharCarteira(t.dataset.c); return; }
+    if (t.dataset.preco) { SIM.carteiras[t.dataset.c].preco = t.dataset.preco; salvarSim(); redesenharCarteira(t.dataset.c); return; }
+    if (t.dataset.comparar) { SIM.comparar = t.dataset.comparar === 'true'; salvarSim(); render(); return; }
+    if (t.dataset.gCart) { SIM_G.cart = t.dataset.gCart === 'comp' ? 'comp' : Number(t.dataset.gCart); SIM_G.sel = null; trocarGrafico(true); return; }
+    if (t.dataset.gModo) { SIM_G.modo = t.dataset.gModo; trocarGrafico(false); return; }
+    if (t.dataset.gPer) { SIM_G.per = t.dataset.gPer; SIM_G.sel = null; trocarGrafico(true); return; }
     if (t.dataset.simPer || t.dataset.simCart || t.dataset.simFiltro) {
       if (t.dataset.simPer) SIM_VISTA.per = t.dataset.simPer;
       if (t.dataset.simCart) SIM_VISTA.cart = Number(t.dataset.simCart);
@@ -2233,7 +2486,6 @@ function ligarSimular() {
       raiz.querySelector('.sim-periodos').outerHTML = htmlPeriodosSim();
       return;
     }
-    if (t.dataset.modoProv) { SIM.proventos = t.dataset.modoProv; salvarSim(); render(); return; }
     if (t.dataset.add != null) {
       const c = SIM.carteiras[t.dataset.add];
       c.itens.push({ tipo: 'bolsa', ticker: '', peso: Math.max(0, 100 - pesoSoma(c)) });
@@ -2247,12 +2499,40 @@ function ligarSimular() {
       salvarSim(); redesenharCarteira(row.dataset.c);
       return;
     }
-    if (t.id === 'sim-comparar') { SIM.comparar = !SIM.comparar; salvarSim(); render(); return; }
     if (t.id === 'sim-rodar') rodarSimulacao();
   });
-  desenharGraficoSim();
+  desenharGraficosSim();
 }
-window.addEventListener('resize', () => { if (location.hash === '#simular') { clearTimeout(ligarSimular.t); ligarSimular.t = setTimeout(desenharGraficoSim, 150); } });
+window.addEventListener('resize', () => { if (location.hash === '#simular') { clearTimeout(ligarSimular.t); ligarSimular.t = setTimeout(() => desenharGraficosSim({ fim: false }), 150); } });
+
+
+function htmlGlossarioSim() {
+  const it = (t, d) => `<div><dt>${t}</dt><dd>${d}</dd></div>`;
+  return `<details class="bloco sim-glossario">
+    <summary><h2>Entenda cada número</h2></summary>
+    <dl>
+      ${it('Saiu do seu bolso', 'Dinheiro novo que você colocou. Na opção "pagam parte do aporte", é o aporte do mês menos os proventos que caíram desde o aporte anterior.')}
+      ${it('Proventos reinvestidos', 'Proventos que pagaram parte das compras do mês seguinte, em vez de sair do seu bolso.')}
+      ${it('Total investido', 'Tudo o que foi usado nas compras: o que saiu do bolso mais os proventos reinvestidos.')}
+      ${it('Valor hoje', 'Cotas × preço de hoje, mais o valor atualizado da renda fixa, mais o dinheiro parado (sobra das cotas inteiras e proventos esperando o próximo aporte).')}
+      ${it('Valorização das cotas', 'Quanto as cotas valem hoje a mais (ou a menos) do que você pagou por elas, já com as taxas da B3. É ganho "no papel": só vira dinheiro se vender.')}
+      ${it('Rendimento da renda fixa', 'Juros acumulados no Tesouro, CDB ou LCI/LCA, dia a dia, pela taxa escolhida.')}
+      ${it(`${swProv('dividendo')}Dividendo`, 'Parte do lucro da empresa paga a quem tem a ação. Isento de IR para pessoa física.')}
+      ${it(`${swProv('jcp')}JCP — juros sobre capital próprio`, 'Outra forma de a empresa distribuir lucro. Tem 15% de IR retido na fonte: o app mostra o valor líquido, o que cai na conta.')}
+      ${it(`${swProv('rendimento')}Rendimento de FII`, 'Distribuição mensal dos fundos imobiliários (aluguéis, juros de CRI). Isento de IR para pessoa física.')}
+      ${it('Data-com, data ex e pagamento', 'Tem direito ao provento quem tem a cota no fim da data-com; no dia seguinte (data ex) a cota já é negociada sem ele. O dinheiro cai depois, na data de pagamento — às vezes semanas ou meses depois. O app conta o direito na data-com e o dinheiro no pagamento.')}
+      ${it('A receber', 'Proventos cuja data-com já passou mas que ainda não foram pagos. Não entram no ganho até caírem na conta.')}
+      ${it('Ganho total', 'Valor hoje − o que saiu do seu bolso. É a soma da valorização das cotas, do rendimento da renda fixa e dos proventos recebidos.')}
+      ${it('Preço de compra', 'A bolsa guarda, para cada dia, abertura (10h), mínima, máxima e fechamento (cerca de 18h). O app compra pelo que você escolher; o preço de cada hora do dia não fica guardado nas fontes grátis. Cada compra mostra a faixa do dia para você comparar.')}
+      ${it('Cotas inteiras e sobra', 'Na bolsa só se compra cota inteira. O que não dá para uma cota fica em caixa e entra no aporte do mês seguinte.')}
+      ${it('Taxas', 'Ações, FIIs e ETFs pagam 0,03% de taxas da B3 em cada compra (corretagem zero). Tesouro e CDB não têm taxa na compra; a custódia do Tesouro não está na conta.')}
+      ${it('IR da renda fixa', 'Tesouro e CDB pagam IR só no resgate, de 22,5% (até 6 meses) a 15% (mais de 2 anos) sobre o rendimento. LCI/LCA é isenta. Ações vendidas até R$ 20 mil por mês são isentas; FIIs pagam 20% sobre o lucro na venda.')}
+    </dl>
+    <p class="dica">Fontes: preços e proventos do Yahoo Finance; tipo e data de pagamento dos proventos do Status Invest (ou da brapi); Selic, CDI e IPCA do Banco Central. É uma estimativa, não recomendação de investimento.</p>
+  </details>`;
+}
+
+// ---------- por período: dia (cada operação), mês, ano, tudo ----------
 
 // ---------- aba Ajustes ----------
 function renderAjustes() {

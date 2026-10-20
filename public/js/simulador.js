@@ -79,6 +79,12 @@ export const TIPOS_PROV_SIM = {
 };
 export const IR_JCP = 0.15; // JCP tem 15% de IR retido na fonte; dividendos e rendimentos de FII são isentos
 
+/** Classe do item, com as mesmas chaves do gráfico do Histórico: acao, fii, outros (ETF/BDR), tesouro, rf. */
+export function classeSim(it) {
+  if (it.tipo === 'bolsa') return it.classe === 'fii' ? 'fii' : ['etf', 'bdr'].includes(it.classe) ? 'outros' : 'acao';
+  return it.tipo === 'cdb' || it.tipo === 'lci' ? 'rf' : 'tesouro';
+}
+
 /**
  * Roda a simulação de uma carteira.
  * @param {object} cfg  { inicio: 'AAAA-MM', aporte: número, proventos: 'dentro' | 'somar' | 'guardar', preco: 'fechamento' | 'abertura' | 'medio', itens: [{tipo, ticker?, taxa?, peso}] }
@@ -111,11 +117,12 @@ export function simular(cfg, dados) {
   const ipcaMes = (d) => ultimoAte(ipca, `${d.slice(0, 7)}-01`) ?? 0.4; // mês ainda não divulgado: repete o último
 
   const pos = cfg.itens.map((it) => {
-    const p = { ...it, rotulo: rotuloItem(it), peso: Math.max(0, Number(it.peso) || 0) / pesoTotal, aplicado: 0, custos: 0, proventos: 0, porTipo: {}, qtd: 0, lotes: [] };
+    const p = { ...it, classe: classeSim(it), rotulo: rotuloItem(it), peso: Math.max(0, Number(it.peso) || 0) / pesoTotal, aplicado: 0, custos: 0, proventos: 0, porTipo: {}, qtd: 0, lotes: [] };
     if (it.tipo === 'bolsa') {
       const h = dados.precos[it.ticker];
       p.dias = h.dias;
       p.fii = Boolean(h.fii) || it.classe === 'fii';
+      if (p.fii) p.classe = 'fii';
       p.splits = h.splits || [];
       p.fatorFuturo = (d) => p.splits.filter((s) => s.data > d).reduce((f, s) => f * s.fator, 1);
       p.provs = (h.proventos || []).filter((x) => x.data >= inicioDia).map((x) => ({ ...x, tipo: x.tipo || (p.fii ? 'rendimento' : 'provento') }));
@@ -147,7 +154,7 @@ export function simular(cfg, dados) {
   const meses = new Map();
   const doMes = (d) => {
     const k = d.slice(0, 7);
-    if (!meses.has(k)) meses.set(k, { mes: k, bolso: 0, reinvestido: 0, proventos: 0, provTipos: {}, valorFim: 0, rfFim: 0, rfAplicado: 0 });
+    if (!meses.has(k)) meses.set(k, { mes: k, bolso: 0, reinvestido: 0, proventos: 0, provTipos: {}, valorFim: 0, rfFim: 0, rfAplicado: 0, aplicado: {}, valorClasse: {} });
     return meses.get(k);
   };
   const totalEm = (d) => pos.reduce((s, p) => s + valorItem(p, d), 0) + caixa + provPend + provFora;
@@ -214,6 +221,7 @@ export function simular(cfg, dados) {
           p.lotes.push({ data: d, aplicado: verba, valor: verba });
           p.aplicado += verba;
           m.rfAplicado += verba;
+          m.aplicado[p.classe] = (m.aplicado[p.classe] || 0) + verba;
           resta -= verba;
           ops.push({ tipo: 'aplicacao', data: d, rotulo: p.rotulo, rf: p.tipo, valor: verba });
         }
@@ -224,6 +232,7 @@ export function simular(cfg, dados) {
         if (!c.n) continue;
         const custo = c.n * c.precoReal * TAXA_B3_PADRAO;
         c.p.qtd += c.n * c.fator; c.p.aplicado += c.n * c.precoReal; c.p.custos += custo;
+        m.aplicado[c.p.classe] = (m.aplicado[c.p.classe] || 0) + c.n * c.precoReal + custo;
         ops.push({ tipo: 'compra', data: d, ticker: c.p.ticker, fii: c.p.fii, qtd: c.n, preco: c.precoReal, custo, total: c.n * c.precoReal + custo,
           diaPregao: c.diaVela, abertura: c.vela[2] * c.fator, minima: c.vela[3] * c.fator, maxima: c.vela[4] * c.fator, fechamento: c.vela[1] * c.fator });
       }
@@ -233,6 +242,8 @@ export function simular(cfg, dados) {
     const mf = doMes(d); // o último dia útil do mês fica por último
     mf.valorFim = totalEm(d);
     mf.rfFim = valorRF(d);
+    mf.valorClasse = {};
+    for (const p of pos) mf.valorClasse[p.classe] = (mf.valorClasse[p.classe] || 0) + valorItem(p, d);
     anterior = d;
   }
   if (!serie.length || serie[serie.length - 1].data !== fim) serie.push({ data: fim, bolso, total: totalEm(fim), proventos: pos.reduce((s, p) => s + p.proventos, 0) });
@@ -243,7 +254,7 @@ export function simular(cfg, dados) {
     const ir = p.tipo === 'bolsa' || p.tipo === 'lci' ? 0
       : p.lotes.reduce((s, l) => s + Math.max(0, l.valor - l.aplicado) * aliquotaRendaFixa(diasEntre(l.data, fim)), 0);
     return {
-      rotulo: p.rotulo, tipo: p.tipo, ticker: p.ticker, fii: p.fii, peso: p.peso, aplicado: p.aplicado + p.custos, custos: p.custos,
+      rotulo: p.rotulo, tipo: p.tipo, classe: p.classe, ticker: p.ticker, fii: p.fii, peso: p.peso, aplicado: p.aplicado + p.custos, custos: p.custos,
       qtd: p.tipo === 'bolsa' ? Math.round(p.qtd * 1000) / 1000 : null,
       preco: p.tipo === 'bolsa' ? ultimoAte(p.dias, fim) : null,
       valor, proventos: p.proventos, porTipo: p.porTipo, ir,

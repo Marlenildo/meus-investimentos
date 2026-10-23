@@ -1082,14 +1082,17 @@ html, body { overflow-x: clip; }
 /* no celular continua tudo numa linha só: tipo e ativo lado a lado, mais compactos */
 @media (max-width: 480px) {
   .sim-itens-cab { display: none; }
-  .sim-item { grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr) 54px 28px; gap: 5px; }
+  .sim-item { grid-template-columns: minmax(80px, 0.6fr) minmax(0, 1.4fr) 60px 24px; gap: 5px; } /* "Tesouro" inteiro e % com espaço para 100 ou 33,3 */
   .sim-tipo .sel-btn { padding: 0 4px 0 8px; gap: 2px; font-size: 0.8rem; }
-  .sim-tipo .sel-btn svg { width: 14px; height: 14px; }
+  .sim-tipo .sel-btn svg { width: 12px; height: 12px; }
   .sim-item .sim-ativo-btn { padding: 0 6px; gap: 6px; }
   .sim-item .sim-ativo-btn .logo-ativo { width: 24px; height: 24px; border-radius: 7px; }
   .sim-item .sa-txt b { font-size: 0.84rem; }
-  .sim-item .sim-peso { gap: 3px; }
-  .sim-item .sim-peso input, .sim-item .sim-taxa input { padding: 0 6px; }
+  .sim-item .sim-peso { gap: 2px; }
+  .sim-item .sim-peso small { font-size: 0.7rem; }
+  .sim-tipo .sel-btn { padding: 0 3px 0 7px; }
+  .sim-item .sim-peso input, .sim-item .sim-taxa input { padding: 0 4px; }
+  .sim-item .sim-peso input { font-size: 0.95rem; }
   .sim-item .sim-taxa small { display: none; }
 }
 .sim-itens-acoes { display: flex; flex-wrap: wrap; gap: 8px; }

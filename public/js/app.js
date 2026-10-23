@@ -14,7 +14,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.13.3';
+export const VERSAO = '1.13.4';
 const VERSAO_DATA = '2026-10-23';
 
 let S = carregar();

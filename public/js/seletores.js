@@ -1,5 +1,6 @@
 // Seletores no tema do app: troca a lista nativa dos <select> e o calendário nativo dos
-// <input type="date"> por versões próprias, iguais no celular e no computador.
+// <input type="date"> por versões próprias, iguais no celular e no computador
+// (a data também pode ser digitada, e o calendário escolhe mês e ano direto).
 // O elemento original continua na página (escondido) com o mesmo id, valor e eventos,
 // então o resto do app lê e escreve nele como sempre.
 
@@ -39,7 +40,7 @@ function fecharAberto() {
   if (aberto) aberto.fechar();
 }
 
-function abrirPainel(gatilho, conteudo, { classe = '', aoFechar } = {}) {
+function abrirPainel(gatilho, conteudo, { classe = '', aoFechar, ancora = gatilho } = {}) {
   fecharAberto();
   const raiz = gatilho.closest('dialog') || document.body; // dentro de um diálogo, o painel fica na mesma camada
   const fundo = document.createElement('div');
@@ -53,8 +54,8 @@ function abrirPainel(gatilho, conteudo, { classe = '', aoFechar } = {}) {
   const posicionar = () => {
     if (celular()) { painel.classList.add('folha'); painel.style.cssText = ''; return; }
     painel.classList.remove('folha');
-    const r = gatilho.getBoundingClientRect();
-    const largura = Math.max(r.width, painel.classList.contains('cal') ? 300 : 200);
+    const r = ancora.getBoundingClientRect();
+    const largura = painel.classList.contains('cal') ? 304 : Math.max(r.width, 200); // o calendário tem tamanho próprio, não estica com o campo
     let left = Math.min(r.left, innerWidth - largura - 12);
     left = Math.max(12, left);
     const alt = painel.offsetHeight;
@@ -176,75 +177,176 @@ function melhorarSelect(sel) {
 }
 
 // ---------- <input type="date"> ----------
+// Vira um campo onde se digita dd/mm/aaaa (as barras entram sozinhas) com o calendário ao lado.
+// No calendário, tocar no título troca para a escolha do mês e, de novo, para a do ano.
+const MESES_CURTOS = MESES.map((m) => m.slice(0, 3));
+const cap = (s) => s.replace(/^./, (c) => c.toUpperCase());
+
+/** "05/03/2024", "5/3/2024" ou "2024-03-05" → "2024-03-05" (null se não for uma data de verdade). */
+function lerData(txt) {
+  const s = String(txt || '').trim();
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const [d, mo, a] = m ? [m[1], m[2], m[3]] : (m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)) ? [m[3], m[2], m[1]] : [];
+  if (!a) return null;
+  const dt = new Date(Number(a), Number(mo) - 1, Number(d));
+  return dt.getFullYear() === Number(a) && dt.getMonth() === Number(mo) - 1 && dt.getDate() === Number(d) ? iso(dt) : null;
+}
+
+/** Põe as barras enquanto se digita: "0503" → "05/03", "05032024" → "05/03/2024". */
+function mascara(txt) {
+  const n = txt.replace(/\D/g, '').slice(0, 8);
+  return n.length > 4 ? `${n.slice(0, 2)}/${n.slice(2, 4)}/${n.slice(4)}` : n.length > 2 ? `${n.slice(0, 2)}/${n.slice(2)}` : n;
+}
+
 function melhorarData(inp) {
   if (inp.dataset.tema) return;
   inp.dataset.tema = '1';
+  const rotulo = inp.getAttribute('aria-label') || inp.closest('label')?.querySelector('span')?.textContent || 'Data';
+  const caixa = document.createElement('span');
+  caixa.className = 'data-campo';
+  const txt = document.createElement('input');
+  txt.type = 'text';
+  txt.className = 'data-txt';
+  txt.inputMode = 'numeric';
+  txt.autocomplete = 'off';
+  txt.placeholder = 'dd/mm/aaaa';
+  txt.maxLength = 10;
+  txt.setAttribute('aria-label', `${rotulo} (dd/mm/aaaa)`);
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'sel-btn sel-data';
+  btn.className = 'data-abrir';
+  btn.innerHTML = CAL;
+  btn.setAttribute('aria-label', `Abrir calendário: ${rotulo}`);
   btn.setAttribute('aria-haspopup', 'dialog');
   btn.setAttribute('aria-expanded', 'false');
-  const rotulo = inp.getAttribute('aria-label') || inp.closest('label')?.querySelector('span')?.textContent || 'Data';
-  btn.setAttribute('aria-label', rotulo);
-  inp.after(btn);
-  ligarRotulo(inp, btn);
+  inp.before(caixa);
+  caixa.append(inp, txt, btn);
   inp.classList.add('sel-nativo');
   inp.tabIndex = -1;
   inp.setAttribute('aria-hidden', 'true');
+  // tocar no rótulo leva o foco para onde se digita
+  inp.closest('label')?.addEventListener('click', (e) => {
+    if (e.target.closest('button, a, input, select')) return;
+    e.preventDefault();
+    txt.focus();
+  });
 
-  const pintar = () => {
-    btn.innerHTML = `${CAL}<span class="sel-txt">${inp.value ? dataBR(inp.value) : '<span class="apagado">dd/mm/aaaa</span>'}</span>`;
-  };
+  const pintar = () => { txt.value = dataBR(inp.value); caixa.classList.remove('invalida'); txt.removeAttribute('aria-invalid'); txt.title = ''; };
   vigiarValor(inp, pintar);
   inp.addEventListener('change', pintar);
-  inp.addEventListener('input', pintar);
   pintar();
 
+  const foraDoLimite = (d) => (inp.min && d < inp.min ? `A data mínima é ${dataBR(inp.min)}.` : inp.max && d > inp.max ? `A data máxima é ${dataBR(inp.max)}.` : '');
+  const gravar = (d) => {
+    if (inp.value !== d) {
+      inp.value = d;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    pintar();
+  };
+  const marcarErro = (msg) => { caixa.classList.add('invalida'); txt.setAttribute('aria-invalid', 'true'); txt.title = msg; };
+  /** Lê o que foi digitado; final = saiu do campo (aí volta ao valor anterior se não der). */
+  const conferir = (final) => {
+    const d = lerData(txt.value);
+    if (d && !foraDoLimite(d)) { gravar(d); return true; }
+    if (!final) { if (txt.value.length === 10) marcarErro(d ? foraDoLimite(d) : 'Essa data não existe.'); return false; }
+    if (!txt.value.trim() && !inp.required) gravar('');
+    else pintar();
+    return false;
+  };
+
+  txt.addEventListener('input', (e) => {
+    caixa.classList.remove('invalida');
+    const cru = txt.value;
+    const apagando = e.inputType?.startsWith('delete');
+    const noFim = txt.selectionStart === cru.length;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cru) && !apagando && noFim) txt.value = mascara(cru);
+    if (txt.value.length === 10) conferir(false);
+  });
+  txt.addEventListener('blur', () => conferir(true));
+  txt.addEventListener('focus', () => txt.select());
+  txt.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); conferir(true); }
+    else if (e.key === 'Escape' && txt.value !== dataBR(inp.value)) { e.preventDefault(); e.stopPropagation(); pintar(); }
+    else if ((e.key === 'ArrowDown' && e.altKey) || e.key === 'F4') { e.preventDefault(); abrir(); }
+    else if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && inp.value) {
+      // setas sobem e descem um dia
+      e.preventDefault();
+      const [y, m, dd] = inp.value.split('-').map(Number);
+      const d = iso(new Date(y, m - 1, dd + (e.key === 'ArrowUp' ? 1 : -1)));
+      if (!foraDoLimite(d)) gravar(d);
+    }
+  });
+
   const abrir = () => {
+    conferir(true);
     const min = inp.min || '', max = inp.max || '';
     const valido = (d) => (!min || d >= min) && (!max || d <= max);
-    let sel = inp.value || '';
-    const base = sel || (max && hoje() > max ? max : hoje());
+    const sel = inp.value || '';
+    const base = sel || (max && hoje() > max ? max : min && hoje() < min ? min : hoje());
     let ano = Number(base.slice(0, 4)), mes = Number(base.slice(5, 7)) - 1;
     let foco = sel || base;
+    let vista = 'dias'; // 'dias' | 'meses' | 'anos'
 
     const cal = document.createElement('div');
     cal.className = 'sel-cal';
     cal.setAttribute('role', 'dialog');
     cal.setAttribute('aria-label', rotulo);
 
-    const desenhar = (focar) => {
+    const anoMin = min ? Number(min.slice(0, 4)) : -Infinity, anoMax = max ? Number(max.slice(0, 4)) : Infinity;
+    const mesOk = (a, m) => (!min || iso(new Date(a, m + 1, 0)) >= min) && (!max || iso(new Date(a, m, 1)) <= max);
+    const inicioAnos = () => ano - (((ano % 12) + 12) % 12);
+
+    const htmlDias = () => {
       const primeiro = new Date(ano, mes, 1);
       const inicio = new Date(ano, mes, 1 - primeiro.getDay());
-      const dias = [];
-      for (let i = 0; i < 42; i++) {
-        const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i);
-        dias.push(d);
-      }
-      // corta a última semana quando ela é toda do mês seguinte
-      const semanas = dias.slice(35).every((d) => d.getMonth() !== mes) ? 5 : 6;
+      const dias = Array.from({ length: 42 }, (_, i) => new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i));
+      const semanas = dias.slice(35).every((d) => d.getMonth() !== mes) ? 5 : 6; // corta a última semana quando ela é toda do mês seguinte
       const h = hoje();
-      const antOk = !min || iso(new Date(ano, mes, 0)) >= min;
-      const proxOk = !max || iso(new Date(ano, mes + 1, 1)) <= max;
-      cal.innerHTML = `
-        ${celular() ? `<div class="sel-titulo">${esc(rotulo)}</div>` : ''}
-        <div class="cal-cab">
-          <button type="button" class="cal-nav" data-nav="-1" aria-label="Mês anterior" ${antOk ? '' : 'disabled'}>${ANT}</button>
-          <b>${MESES[mes].replace(/^./, (c) => c.toUpperCase())} de ${ano}</b>
-          <button type="button" class="cal-nav" data-nav="1" aria-label="Próximo mês" ${proxOk ? '' : 'disabled'}>${PROX}</button>
-        </div>
-        <div class="cal-grade" role="grid">
+      return `<div class="cal-grade" role="grid">
           ${DIAS.map((d) => `<span class="cal-dsem" aria-hidden="true">${d}</span>`).join('')}
           ${dias.slice(0, semanas * 7).map((d) => {
             const s = iso(d);
             const cls = [d.getMonth() !== mes ? 'fora' : '', s === h ? 'hoje' : '', s === sel ? 'sel' : ''].join(' ');
             return `<button type="button" class="cal-dia ${cls}" data-d="${s}" tabindex="${s === foco ? 0 : -1}" aria-label="${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}" ${s === sel ? 'aria-pressed="true"' : ''} ${valido(s) ? '' : 'disabled'}>${d.getDate()}</button>`;
           }).join('')}
-        </div>
-        <div class="cal-rodape">
-          <button type="button" class="cal-hoje" data-d="${h}" ${valido(h) ? '' : 'disabled'}>Hoje</button>
         </div>`;
-      if (focar) cal.querySelector(`[data-d="${foco}"].cal-dia`)?.focus({ preventScroll: true });
+    };
+    const htmlMeses = () => `<div class="cal-grade-g">${MESES_CURTOS.map((m, i) => {
+      const cls = [i === mes ? 'sel' : '', ano === new Date().getFullYear() && i === new Date().getMonth() ? 'hoje' : ''].join(' ');
+      return `<button type="button" class="cal-mes ${cls}" data-mes="${i}" aria-label="${MESES[i]} de ${ano}" ${mesOk(ano, i) ? '' : 'disabled'}>${cap(m)}</button>`;
+    }).join('')}</div>`;
+    const htmlAnos = () => {
+      const a0 = inicioAnos();
+      return `<div class="cal-grade-g">${Array.from({ length: 12 }, (_, i) => a0 + i).map((a) => {
+        const cls = [a === ano ? 'sel' : '', a === new Date().getFullYear() ? 'hoje' : ''].join(' ');
+        return `<button type="button" class="cal-mes ${cls}" data-ano="${a}" ${a < anoMin || a > anoMax ? 'disabled' : ''}>${a}</button>`;
+      }).join('')}</div>`;
+    };
+
+    const desenhar = (focar) => {
+      const a0 = inicioAnos();
+      const [titulo, antOk, proxOk, rotAnt, rotProx] = vista === 'dias'
+        ? [`${cap(MESES[mes])} de ${ano}`, mesOk(mes ? ano : ano - 1, (mes + 11) % 12), mesOk(mes === 11 ? ano + 1 : ano, (mes + 1) % 12), 'Mês anterior', 'Próximo mês']
+        : vista === 'meses'
+          ? [String(ano), ano - 1 >= anoMin, ano + 1 <= anoMax, 'Ano anterior', 'Próximo ano']
+          : [`${a0} – ${a0 + 11}`, a0 - 1 >= anoMin, a0 + 12 <= anoMax, 'Anos anteriores', 'Próximos anos'];
+      cal.innerHTML = `
+        ${celular() ? `<div class="sel-titulo">${esc(rotulo)}</div>` : ''}
+        <div class="cal-cab">
+          <button type="button" class="cal-nav" data-nav="-1" aria-label="${rotAnt}" ${antOk ? '' : 'disabled'}>${ANT}</button>
+          <button type="button" class="cal-titulo" data-vista ${vista === 'anos' ? 'disabled' : ''} aria-label="${vista === 'dias' ? 'Escolher mês e ano' : 'Escolher o ano'}">${titulo}${vista === 'anos' ? '' : SETA}</button>
+          <button type="button" class="cal-nav" data-nav="1" aria-label="${rotProx}" ${proxOk ? '' : 'disabled'}>${PROX}</button>
+        </div>
+        ${vista === 'dias' ? htmlDias() : vista === 'meses' ? htmlMeses() : htmlAnos()}
+        <div class="cal-rodape">
+          ${vista === 'dias' ? '' : '<button type="button" class="cal-hoje cal-voltar" data-voltar>Voltar aos dias</button>'}
+          <button type="button" class="cal-hoje" data-d="${hoje()}" ${valido(hoje()) ? '' : 'disabled'}>Hoje</button>
+        </div>`;
+      if (!focar) return;
+      const alvo = vista === 'dias' ? cal.querySelector(`[data-d="${foco}"].cal-dia`) : cal.querySelector('.cal-mes.sel:not(:disabled)') || cal.querySelector('.cal-mes:not(:disabled)');
+      alvo?.focus({ preventScroll: true });
     };
 
     const ir = (s) => {
@@ -254,27 +356,42 @@ function melhorarData(inp) {
     };
 
     desenhar(false);
-    const { painel, fechar } = abrirPainel(btn, cal, { classe: 'cal' });
+    const { painel, fechar } = abrirPainel(btn, cal, { classe: 'cal', ancora: caixa });
     (cal.querySelector('.cal-dia.sel') || cal.querySelector('.cal-dia.hoje:not(:disabled)') || cal.querySelector('.cal-dia:not(.fora):not(:disabled)'))?.focus({ preventScroll: true });
 
     painel.addEventListener('click', (e) => {
-      const nav = e.target.closest('[data-nav]');
-      if (nav) {
-        mes += Number(nav.dataset.nav);
-        if (mes < 0) { mes = 11; ano--; } else if (mes > 11) { mes = 0; ano++; }
-        foco = iso(new Date(ano, mes, 1));
+      const b = e.target.closest('button');
+      if (!b || b.disabled) return;
+      if (b.dataset.nav) {
+        const passo = Number(b.dataset.nav);
+        if (vista === 'dias') {
+          mes += passo;
+          if (mes < 0) { mes = 11; ano--; } else if (mes > 11) { mes = 0; ano++; }
+          foco = iso(new Date(ano, mes, 1));
+        } else ano += vista === 'meses' ? passo : passo * 12;
         desenhar(false);
-        return;
+      } else if (b.hasAttribute('data-vista')) {
+        vista = vista === 'dias' ? 'meses' : 'anos';
+        desenhar(true);
+      } else if (b.hasAttribute('data-voltar')) {
+        vista = 'dias';
+        desenhar(true);
+      } else if (b.dataset.ano) {
+        ano = Number(b.dataset.ano);
+        vista = 'meses';
+        desenhar(true);
+      } else if (b.dataset.mes) {
+        mes = Number(b.dataset.mes);
+        vista = 'dias';
+        // mantém o dia escolhido no novo mês, se der
+        const dia = Math.min(Number((sel || base).slice(8, 10)), new Date(ano, mes + 1, 0).getDate());
+        foco = iso(new Date(ano, mes, dia));
+        desenhar(true);
+      } else if (b.dataset.d) {
+        gravar(b.dataset.d);
+        fechar({ devolverFoco: false });
+        if (!celular()) txt.focus({ preventScroll: true });
       }
-      const d = e.target.closest('[data-d]');
-      if (!d || d.disabled) return;
-      sel = d.dataset.d;
-      if (inp.value !== sel) {
-        inp.value = sel;
-        inp.dispatchEvent(new Event('input', { bubbles: true }));
-        inp.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      fechar();
     });
     painel.addEventListener('keydown', (e) => {
       const d = document.activeElement?.dataset?.d;

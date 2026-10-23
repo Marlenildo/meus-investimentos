@@ -13,8 +13,8 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.11.1';
-const VERSAO_DATA = '2026-10-19';
+export const VERSAO = '1.12.0';
+const VERSAO_DATA = '2026-10-23';
 
 let S = carregar();
 const statusCotacao = {}; // ativoId -> {erro?, variacao?}
@@ -41,15 +41,6 @@ const nomeMes = (ym) => MESES[Number(ym.slice(5, 7)) - 1];
 const nomeMesAno = (ym) => `${nomeMes(ym)} de ${ym.slice(0, 4)}`;
 const mesCurto = (ym) => `${nomeMes(ym).slice(0, 3)}/${ym.slice(2, 4)}`;
 const dataBR = (iso) => iso ? iso.slice(0, 10).split('-').reverse().join('/') : '';
-const isoData = (ano, mes, dia) => `${String(ano).padStart(4, '0')}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
-const lerDataDigitada = (valor) => {
-  const m = String(valor || '').trim().match(/^(?:(\d{2})\/(\d{2})\/(\d{4})|(\d{4})-(\d{2})-(\d{2}))$/);
-  if (!m) return null;
-  const [, diaBR, mesBR, anoBR, anoISO, mesISO, diaISO] = m;
-  const ano = Number(anoBR || anoISO), mes = Number(mesBR || mesISO), dia = Number(diaBR || diaISO);
-  const data = new Date(ano, mes - 1, dia);
-  return data.getFullYear() === ano && data.getMonth() === mes - 1 && data.getDate() === dia ? isoData(ano, mes - 1, dia) : null;
-};
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const $ = (sel, el = document) => el.querySelector(sel);
 const num = (v) => {
@@ -173,6 +164,11 @@ function liquidando(compras = S.compras) {
 
 // ---------- aba Comprar (tela inicial) ----------
 const fmtPreco = (v) => (v ? v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '');
+// Botões padronizados em todo o app:
+// lixeira sem borda = remover um item (confirma no segundo toque); pílula vermelha com lixeira = ação destrutiva grande;
+// × = zerar/limpar o que foi digitado, sem apagar nada salvo, e também fechar janelas
+const ICONE_DESFAZER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
+const ICONE_LIMPAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 const ICONE_ATUALIZAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>';
 
 function posicoes() {
@@ -232,10 +228,10 @@ function htmlOrdem(a, pos) {
           <button type="button" data-mais="${a.id}" aria-label="Mais ${esc(a.ticker)}">+</button>
         </div>
         <button type="button" class="max" data-max="${a.id}" title="Usar o que falta">MÁX</button>
-        <button type="button" class="icone-btn limpar-qtd perigo" data-limpar-qtd="${a.id}" title="Zerar somente ${esc(a.ticker)}" aria-label="Zerar somente ${esc(a.ticker)}">${ICONE_LIXO}</button>
+        <button type="button" class="ic-btn limpar-qtd" data-limpar-qtd="${a.id}" title="Zerar ${esc(a.ticker)}" aria-label="Zerar a quantidade de ${esc(a.ticker)}">${ICONE_LIMPAR}</button>
       </div>
       <div class="o-total" data-total="${a.id}"></div>
-      <button type="button" class="x x-del" data-del-ativo="${a.id}" title="Tirar ${esc(a.ticker)} da lista" aria-label="Tirar ${esc(a.ticker)} da lista">✕</button>
+      <button type="button" class="ic-btn perigo x-del" data-del-ativo="${a.id}" title="Tirar ${esc(a.ticker)} da lista" aria-label="Tirar ${esc(a.ticker)} da lista">${ICONE_LIXO}</button>
     </div>`;
 }
 
@@ -264,6 +260,8 @@ function pintarTotais() {
       <div class="ln total"><span>Total da compra</span><span class="num">${R(r.total)}</span></div>`;
     $('#btn-registrar').disabled = r.ordens === 0;
   }
+  const limpar = $('#btn-limpar');
+  if (limpar) limpar.disabled = r.ordens === 0;
   renderBoleta();
 }
 
@@ -323,7 +321,7 @@ function renderComprar() {
             <option value="">Ordenar…</option><option value="tipo">Por tipo</option><option value="az">A → Z</option><option value="posicao">Maior posição</option>
           </select>
           <button type="button" class="btn peq" id="btn-dividir" title="Divide o valor entre os ativos pela % de cada um">Dividir em %</button>
-          <button type="button" class="btn peq" id="btn-limpar">Zerar</button>
+          <button type="button" class="btn peq" id="btn-limpar" title="Zerar as quantidades de todos os ativos" ${Object.keys(S.plano.qtds).length ? '' : 'disabled'}>${ICONE_LIMPAR}Zerar</button>
           <button type="button" class="btn peq ${editandoLista ? 'ativo' : ''}" id="btn-editar" aria-pressed="${editandoLista}">${editandoLista ? 'Pronto' : 'Editar'}</button>
           <button type="button" class="icone-btn ${atualizando ? 'girando' : ''}" id="btn-cotacoes" title="Atualizar preços" aria-label="Atualizar preços">${ICONE_ATUALIZAR}</button>
         </div>
@@ -395,7 +393,8 @@ function ligarComprar() {
     if (existente) { toast(`${ticker} já está na lista.`); $(`#q-${existente.id}`)?.focus(); return; }
     const novo = { id: uid(), ticker, tipo, nome: tipo === 'tesouro' ? ticker : nome || '', preco: null, precoEm: null, fonte: null };
     S.ativos.push(novo);
-    persist('ativos');
+    const fora = S.ajustes.foraDaLista || [];
+    if (fora.includes(ticker)) { S.ajustes.foraDaLista = fora.filter((t) => t !== ticker); persist('ativos', 'ajustes'); } else persist('ativos');
     render();
     $(`#q-${novo.id}`)?.scrollIntoView({ block: 'center' });
     toast(tipo === 'tesouro' ? `${ticker} adicionado. Digite o preço do site do Tesouro.` : `${ticker} adicionado.`);
@@ -646,7 +645,7 @@ function abrirDividir() {
       <h2>Dividir a compra</h2>
       <p class="dica">Marque os ativos que entram nesta compra e diga quanto vai para cada um. O app calcula quantas cotas cabem em cada parte, já com as taxas do ${esc(b.nome)}.</p>
       <label class="campo dv-valor"><span>Valor para dividir</span><input id="dv-valor" class="num" inputmode="decimal" value="${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"><span class="sub">aporte + proventos: ${R(disponivel())}</span></label>
-      <div class="dv-atalhos"><button type="button" class="btn peq" id="dv-igual">Partes iguais</button><button type="button" class="btn peq" id="dv-zerar">Zerar %</button></div>
+      <div class="dv-atalhos"><button type="button" class="btn peq" id="dv-igual">Partes iguais</button><button type="button" class="btn peq" id="dv-zerar">${ICONE_LIMPAR}Zerar %</button></div>
       <div class="dv-lista">${ativos.map((a) => `<div class="dv-item" data-tk="${esc(a.ticker)}">
         <label class="dv-check" title="Incluir ${esc(a.ticker)} na compra"><input type="checkbox" data-dv-incluir="${a.id}" aria-label="Incluir ${esc(a.ticker)} na compra" ${selecionados.has(a.id) ? 'checked' : ''} ${a.preco > 0 ? '' : 'disabled'}></label>
         ${htmlLogo(a)}
@@ -1436,9 +1435,33 @@ function htmlPorTipo(c) {
     </section>`;
 }
 
+const ICONE_GRAFICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-6"/><path d="M16 8h4v4"/></svg>';
+const ICONE_MOEDAS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>';
+
+/** Tela vazia de uma aba: o que vai aparecer ali e como preencher. */
+function htmlVazio({ icone, titulo, texto, passos = [], acoes = '' }) {
+  return `<section class="bloco"><div class="vazio">
+    <span class="vazio-icone">${icone}</span>
+    <h2>${titulo}</h2>
+    <p>${texto}</p>
+    ${passos.length ? `<ul class="vazio-passos">${passos.map((x) => `<li>${x}</li>`).join('')}</ul>` : ''}
+    ${acoes ? `<div class="acoes">${acoes}</div>` : ''}
+  </div></section>`;
+}
+
 function renderCarteira() {
   if (!S.compras.length) {
-    return `<section class="bloco"><div class="vazio"><h2>Seu histórico aparece aqui</h2><p>Registre uma compra em <b>Comprar</b> depois de investir, ou importe suas operações da B3 em <b>Ajustes</b>. Aqui você acompanha cotas, preço médio, valor investido e retorno.</p><div class="acoes"><a class="btn prim" href="#comprar">Ir para Comprar</a><a class="btn" href="#ajustes">Importar dados da B3</a></div></div></section>`;
+    return htmlVazio({
+      icone: ICONE_GRAFICO,
+      titulo: 'Seu histórico começa na primeira compra',
+      texto: 'Aqui ficam suas compras e vendas, quanto vale cada ativo hoje, o preço médio, o retorno e o gráfico dos aportes mês a mês.',
+      passos: [
+        '<b>Já investe?</b> Importe o extrato de Movimentação da B3 em Ajustes: compras, vendas e proventos entram de uma vez.',
+        '<b>Vai comprar agora?</b> Monte a compra em Comprar e, depois de comprar no banco, toque em <b>Comprei — registrar</b>.',
+        ...(N.nuvem.estado === 'senha' ? ['<b>Já usa o app em outro aparelho?</b> Entre com sua senha para trazer seus dados.'] : []),
+      ],
+      acoes: `<a class="btn prim" href="#ajustes" data-rolar="importar-b3">Importar da B3</a><a class="btn" href="#comprar">Ir para Comprar</a>${N.nuvem.estado === 'senha' ? '<button type="button" class="btn" data-entrar>Entrar</button>' : ''}`,
+    });
   }
   const db = dadosDoBanco(); // com um banco escolhido, os números de cima são só dele
   const c = carteira(db.compras, S.ativos, db.proventos);
@@ -1555,15 +1578,21 @@ function ligarRemover(attr, colecao) {
     if (!b.classList.contains('confirmar')) {
       const original = b.innerHTML;
       b.classList.add('confirmar');
-      b.innerHTML = b.classList.contains('ic-btn') ? `${ICONE_LIXO}<span>remover?</span>` : colecao === 'ativos' ? 'tirar?' : 'confirmar?';
+      b.innerHTML = `${ICONE_LIXO}<span>${colecao === 'ativos' ? 'tirar?' : 'remover?'}</span>`;
       setTimeout(() => { if (b.isConnected) { b.classList.remove('confirmar'); b.innerHTML = original; } }, 3000);
       return;
     }
     const id = b.getAttribute(attr);
+    if (colecao === 'ativos') {
+      // lembra que foi tirado, para não voltar sozinho por estar na carteira
+      const t = S.ativos.find((x) => x.id === id)?.ticker;
+      if (t) S.ajustes.foraDaLista = [...new Set([...(S.ajustes.foraDaLista || []), t])];
+      delete S.plano.qtds[id];
+    }
     S[colecao] = S[colecao].filter((x) => x.id !== id);
     if (colecao === 'compras') N.removerCompra(id);
     if (colecao === 'proventos') N.removerProvento(id);
-    persist(...(colecao === 'ativos' ? ['ativos'] : [])); render(); toast('Removido.');
+    persist(...(colecao === 'ativos' ? ['ativos', 'ajustes', 'plano'] : [])); render(); toast(colecao === 'ativos' ? 'Tirado da lista. Para voltar, use + Adicionar ativo.' : 'Removido.');
   });
 }
 
@@ -1594,7 +1623,7 @@ function htmlCardProvento(x) {
 }
 
 
-/** Deixa à vista o ano e o mês escolhidos nas faixas que rolam para o lado. */
+/** Conteúdo do botão que escolhe o ativo do provento: logo, código e nome. */
 function htmlEscolhaAtivoProvento(a) {
   const ativo = a || { ticker: '', nome: '', classe: 'acao' };
   return ativo.ticker
@@ -1602,6 +1631,7 @@ function htmlEscolhaAtivoProvento(a) {
     : '<span class="sa-txt"><b>Escolher ativo</b><small>buscar por nome ou código</small></span>';
 }
 
+/** Deixa à vista o ano e o mês escolhidos nas faixas que rolam para o lado. */
 function centralizarFiltrosPv() {
   document.querySelectorAll('.pv-resumo .seg-rola').forEach((faixa) => {
     const b = faixa.querySelector('[aria-pressed="true"]');
@@ -1727,13 +1757,23 @@ function renderProventos() {
   const ativoProvento = PV_ATIVO || ativoPadrao;
   const porMes = groupBy([...S.proventos].sort((a, b) => b.data.localeCompare(a.data)), (x) => mesDe(x.data));
   const mesAnt = mesAnterior(mesDe(hojeISO()));
-  const semAtivos = !tickers.length;
   return `
-    ${semAtivos ? `<section class="bloco"><div class="vazio"><h2>Seus proventos aparecem aqui</h2><p>Dividendos, JCP e rendimentos de FIIs entram na data em que caem na conta. Primeiro registre uma compra ou importe as operações da B3 em Ajustes; depois você poderá lançar cada pagamento.</p><div class="acoes"><a class="btn prim" href="#comprar">Registrar compra</a><a class="btn" href="#ajustes">Importar dados da B3</a></div></div></section>` : ''}
-    <section class="bloco" ${semAtivos ? 'hidden' : ''}>
+    ${S.proventos.length ? '' : htmlVazio({
+      icone: ICONE_MOEDAS,
+      titulo: 'Seus proventos aparecem aqui',
+      texto: 'Dividendos, JCP, rendimentos de FIIs e juros do Tesouro, somados por ano, por tipo, por classe e por ativo.',
+      passos: [
+        '<b>Quando aparecem:</b> na data em que o dinheiro cai na conta (o pagamento), não na data-com.',
+        '<b>Jeito mais rápido:</b> importe o extrato de Movimentação da B3 em Ajustes. Os pagamentos entram sozinhos, sem repetir.',
+        '<b>Ou lance à mão</b> no formulário abaixo, assim que o banco mostrar o crédito.',
+        `<b>Para que serve:</b> o total de um mês entra sozinho no aporte do mês seguinte, em Comprar.`,
+      ],
+      acoes: `<a class="btn prim" href="#ajustes" data-rolar="importar-b3">Importar da B3</a>${N.nuvem.estado === 'senha' ? '<button type="button" class="btn" data-entrar>Entrar</button>' : ''}`,
+    })}
+    <section class="bloco">
       <div class="bloco-cab"><h2>Lançar provento</h2><small>O total de ${nomeMes(mesAnt)} entra sozinho no aporte de ${nomeMes(mesDe(hojeISO()))}</small></div>
-      <form id="form-prov" class="campos">
-        <label class="campo"><span>Data do pagamento</span>${htmlDataSim('pv-data', hojeISO(), 'Data do pagamento')}</label>
+      <form id="form-prov" class="campos form-prov">
+        <label class="campo"><span>Data do pagamento</span><input type="date" id="pv-data" value="${hojeISO()}" required></label>
         <label class="campo"><span>Ativo</span><button type="button" class="sim-ativo-btn" id="pv-escolher" aria-label="Escolher ativo para o provento">${htmlEscolhaAtivoProvento(ativoProvento)}</button></label>
         <label class="campo"><span>Tipo</span><select id="pv-tipo">${Object.entries(TIPOS_PROVENTO).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
         <label class="campo"><span>Valor recebido (R$)</span><input id="pv-valor" class="num" inputmode="decimal" placeholder="0,00" required></label>
@@ -1741,7 +1781,6 @@ function renderProventos() {
       </form>
     </section>
 
-    ${!semAtivos && !S.proventos.length ? `<section class="bloco"><div class="vazio"><h2>Ainda não há proventos lançados</h2><p>Quando um dividendo, JCP ou rendimento de FII for pago, informe o valor e a data acima. Ele aparecerá aqui e poderá compor o aporte do mês seguinte.</p></div></section>` : ''}
     ${htmlResumoProventos()}
 
     ${S.proventos.length ? `<section class="bloco"><h2>Recebidos</h2>
@@ -1789,44 +1828,8 @@ function abrirEditarProvento(id) {
   dlg.showModal();
 }
 
-function ligarDataProvento() {
-  const raiz = $('#conteudo');
-  const campo = raiz.querySelector('[data-sim-data="pv-data"]');
-  if (!campo) return;
-  const input = $('#pv-data', campo), cal = $('[data-sim-calendario]', campo);
-  const fechar = () => { cal.hidden = true; input.setAttribute('aria-expanded', 'false'); };
-  const abrir = (ano, mes) => {
-    cal.innerHTML = htmlCalendarioSim('pv-data', input.value, ano, mes);
-    cal.hidden = false;
-    input.setAttribute('aria-expanded', 'true');
-  };
-  raiz.addEventListener('click', (e) => {
-    if (!e.target.closest('[data-sim-data="pv-data"]')) fechar();
-    const t = e.target.closest('button');
-    if (!t) return;
-    if (t.dataset.simDataAbrir === 'pv-data') { abrir(); return; }
-    if (t.dataset.simCalNav) {
-      const ano = Number($('[data-sim-cal-ano]', campo).value), mes = Number($('[data-sim-cal-mes]', campo).value) + Number(t.dataset.simCalNav);
-      abrir(ano + Math.floor(mes / 12), (mes + 12) % 12); return;
-    }
-    if (t.dataset.simCalDia) { input.value = dataBR(t.dataset.simCalDia); fechar(); return; }
-    if (t.hasAttribute('data-sim-cal-hoje')) { input.value = dataBR(hojeISO()); fechar(); }
-  });
-  raiz.addEventListener('change', (e) => {
-    if (e.target.dataset.simCalMes != null) abrir(Number($('[data-sim-cal-ano]', campo).value), Number(e.target.value));
-    if (e.target.dataset.simCalAno != null && /^\d{1,6}$/.test(e.target.value)) abrir(Number(e.target.value), Number($('[data-sim-cal-mes]', campo).value));
-  });
-  input.addEventListener('blur', () => {
-    const iso = lerDataDigitada(input.value);
-    input.value = dataBR(iso || hojeISO());
-  });
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } if (e.key === 'Escape') { input.value = dataBR(hojeISO()); fechar(); } });
-}
-
 function ligarProventos() {
   const escolher = $('#pv-escolher'), tipo = $('#pv-tipo');
-  if (!escolher) return;
-  ligarDataProvento();
   const ativo = () => PV_ATIVO || (() => {
     const ticker = [...new Set([...S.ativos.map((a) => a.ticker), ...S.compras.map((c) => c.ticker)])][0];
     return ticker ? { ticker, nome: nomeDoAtivo(ticker), classe: S.ativos.find((a) => a.ticker === ticker)?.tipo || S.compras.find((c) => c.ticker === ticker)?.tipo || 'acao' } : null;
@@ -1845,8 +1848,8 @@ function ligarProventos() {
     e.preventDefault();
     const v = num($('#pv-valor').value);
     if (!Number.isFinite(v) || v <= 0) { toast('Informe o valor recebido.'); return; }
-    const data = lerDataDigitada($('#pv-data').value);
-    if (!data) { toast('Digite uma data válida no formato dd/mm/aaaa.'); $('#pv-data').focus(); return; }
+    const data = $('#pv-data').value;
+    if (!data) { toast('Informe a data do pagamento.'); return; }
     const a = ativo();
     if (!a?.ticker) { toast('Escolha o ativo.'); return; }
     const p = { id: uid(), data, ticker: a.ticker, tipo: tipo.value, valor: round2(v) };
@@ -1970,7 +1973,7 @@ function htmlItemSim(it, ci, ii) {
     <span class="sim-tipo"><select data-campo="tipo" aria-label="Tipo">${Object.entries(TIPOS_SIM).map(([k, v]) => `<option value="${k}" ${k === it.tipo ? 'selected' : ''}>${esc(v.nome)}</option>`).join('')}</select></span>
     ${meio}
     <span class="sim-peso"><input class="num" data-campo="peso" inputmode="decimal" value="${esc(String(it.peso ?? '').replace('.', ','))}" aria-label="Percentual do aporte"><small>%</small></span>
-    <button type="button" class="icone-btn sim-tirar perigo" data-tirar aria-label="Tirar">${ICONE_LIXO}</button>
+    <button type="button" class="ic-btn perigo sim-tirar" data-tirar title="Tirar da carteira" aria-label="Tirar da carteira">${ICONE_LIXO}</button>
   </div>`;
 }
 
@@ -1987,7 +1990,7 @@ function htmlCarteiraSim(c, ci) {
       <label class="sim-aporte-l"><span>No dia</span><select data-dia="${ci}" aria-label="Dia do aporte de ${esc(nomeCart(c, ci))}">${DIAS_APORTE.map(([k, n]) => `<option value="${k}" ${String(c.dia) === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       ${(() => {
         const n = Object.keys(c.edicoes || {}).length + (c.extras || []).length;
-        return n ? `<p class="sim-editados"><span>✎ ${n} ${n === 1 ? 'lançamento alterado' : 'lançamentos alterados'} à mão</span><button type="button" class="btn peq" data-desfazer="${ci}">Desfazer</button></p>`
+        return n ? `<p class="sim-editados"><span>✎ ${n} ${n === 1 ? 'lançamento alterado' : 'lançamentos alterados'} à mão</span><button type="button" class="btn peq" data-desfazer="${ci}">${ICONE_DESFAZER}Desfazer</button></p>`
           : '<p class="dica sim-editados-dica">Depois de simular, em <b>Operações → Dia</b>, toque num aporte para mudar a data ou o valor, ou inclua aportes extras.</p>';
       })()}
     </div>
@@ -2031,7 +2034,7 @@ function abrirEscolherAtivo(aoEscolher, opts = {}) {
   const meus = meusAtivosSim();
   dlg.innerHTML = `
     <form method="dialog" class="form-edit pk-form">
-      <div class="pk-cab"><h2>Escolher ativo</h2><button class="icone-btn" value="cancelar" aria-label="Fechar">✕</button></div>
+      <div class="pk-cab"><h2>Escolher ativo</h2><button class="ic-btn fechar" value="cancelar" aria-label="Fechar">${ICONE_LIMPAR}</button></div>
       <input type="search" id="pk-q" placeholder="Nome ou código — ex.: banco do brasil, PETR4, kinea" autocomplete="off" spellcheck="false" enterkeyhint="search">
       <div class="pk-lista" id="pk-lista" role="listbox" aria-label="Ativos"></div>
       ${opts.manual ? '<button type="button" class="btn peq pk-manual" id="pk-manual">Tesouro, CDB ou outro? Digitar à mão</button>' : ''}
@@ -2566,53 +2569,13 @@ function htmlPeriodosSim() {
   </section>`);
 }
 
-const iconeCalendarioSim = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/></svg>';
-const nomesMesesSim = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-const diasSemanaSim = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
-const anosCalendarioSim = (ano) => {
-  const minimo = Math.min(1900, ano);
-  const maximo = Math.max(Number(hojeISO().slice(0, 4)) + 20, ano);
-  return Array.from({ length: maximo - minimo + 1 }, (_, i) => maximo - i);
-};
-
-function htmlDataSim(id, valor, rotulo) {
-  return `<span class="sim-data" data-sim-data="${id}">
-    <input type="text" id="${id}" value="${dataBR(valor)}" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" aria-label="${rotulo}" aria-haspopup="dialog" aria-expanded="false">
-    <button type="button" class="sim-data-abrir" data-sim-data-abrir="${id}" aria-label="Abrir calendário para ${rotulo}">${iconeCalendarioSim}</button>
-    <div class="sim-calendario" data-sim-calendario hidden></div>
-  </span>`;
-}
-
-function htmlCalendarioSim(id, valor, ano = null, mes = null) {
-  const base = lerDataDigitada(valor) || hojeISO();
-  const [anoBase, mesBase] = base.split('-').map(Number);
-  ano = Number.isInteger(ano) ? ano : anoBase;
-  mes = Number.isInteger(mes) ? mes : mesBase - 1;
-  const primeiroDia = new Date(ano, mes, 1).getDay();
-  const diasNoMes = new Date(ano, mes + 1, 0).getDate();
-  const anterior = new Date(ano, mes, 0).getDate();
-  const selecionada = lerDataDigitada(valor);
-  const celulas = Array.from({ length: 42 }, (_, i) => {
-    const dia = i - primeiroDia + 1;
-    if (dia < 1 || dia > diasNoMes) return `<span class="sim-cal-vazio" aria-hidden="true">${dia < 1 ? anterior + dia : dia - diasNoMes}</span>`;
-    const iso = isoData(ano, mes, dia);
-    const cls = iso === selecionada ? ' selecionado' : iso === hojeISO() ? ' hoje' : '';
-    return `<button type="button" class="sim-cal-dia${cls}" data-sim-cal-dia="${iso}" aria-label="${dataBR(iso)}" aria-pressed="${iso === selecionada}">${dia}</button>`;
-  }).join('');
-  return `<div class="sim-cal-topo">
-    <button type="button" class="sim-cal-nav" data-sim-cal-nav="-1" aria-label="Mês anterior">‹</button>
-    <div class="sim-cal-escolhas"><select data-sim-cal-mes aria-label="Mês">${nomesMesesSim.map((nome, i) => `<option value="${i}" ${i === mes ? 'selected' : ''}>${nome}</option>`).join('')}</select><select data-sim-cal-ano aria-label="Ano">${anosCalendarioSim(ano).map((a) => `<option value="${a}" ${a === ano ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
-    <button type="button" class="sim-cal-nav" data-sim-cal-nav="1" aria-label="Próximo mês">›</button>
-  </div><div class="sim-cal-semana">${diasSemanaSim.map((dia) => `<span>${dia}</span>`).join('')}</div><div class="sim-cal-dias">${celulas}</div><div class="sim-cal-rodape"><button type="button" data-sim-cal-hoje>Hoje</button></div>`;
-}
-
 function renderSimular() {
   return `
     <section class="bloco sim-config">
       <div class="bloco-cab"><h2>Simular aportes</h2><small>e se eu tivesse investido todo mês desde…</small></div>
       <div class="sim-config-linha">
-        <label class="campo"><span>De</span>${htmlDataSim('sim-de', SIM.de, 'Data inicial')}<span class="sub">primeiro dia da simulação</span></label>
-        <label class="campo"><span>Até</span>${htmlDataSim('sim-ate', SIM.ate || hojeISO(), 'Data final')}<span class="sub" data-sim-ate-sub>${SIM.ate && SIM.ate < hojeISO() ? '<button type="button" id="sim-ate-hoje">voltar para hoje</button>' : 'último dia: hoje'}</span></label>
+        <label class="campo"><span>De</span><input type="date" id="sim-de" value="${esc(SIM.de)}" max="${hojeISO()}" required><span class="sub">primeiro dia da simulação</span></label>
+        <label class="campo"><span>Até</span><input type="date" id="sim-ate" value="${esc(SIM.ate || hojeISO())}" min="${esc(SIM.de)}" max="${hojeISO()}" required><span class="sub" data-sim-ate-sub>${SIM.ate && SIM.ate < hojeISO() ? '<button type="button" id="sim-ate-hoje">voltar para hoje</button>' : 'último dia: hoje'}</span></label>
         <div class="campo"><span>Simular</span>
           <div class="seg" role="group" aria-label="Quantas carteiras">${[[false, 'Uma carteira'], [true, 'Comparar duas']].map(([k, n]) => `<button type="button" data-comparar="${k}" aria-pressed="${Boolean(SIM.comparar) === k}">${n}</button>`).join('')}</div>
           <span class="sub">${SIM.comparar ? 'monte as duas e veja qual teria rendido mais' : `só ${esc(nomeCart(SIM.carteiras[0], 0))}`}</span></div>
@@ -2700,7 +2663,7 @@ function abrirEditarAporteSim(chave) {
       </div>
       <p class="dica erro-campo" id="ea-erro" hidden></p>
       <div class="acoes">
-        ${!novo ? `<button class="btn perigo" value="tirar" formnovalidate>${extraId ? 'Apagar' : 'Tirar este aporte'}</button>` : ''}
+        ${!novo ? `<button class="btn perigo" value="tirar" formnovalidate>${ICONE_LIXO}${extraId ? 'Apagar' : 'Tirar este aporte'}</button>` : ''}
         ${ap?.editado && !extraId ? '<button class="btn" value="restaurar" formnovalidate>Como era</button>' : ''}
         <span class="esp"></span><button class="btn" value="cancelar" formnovalidate>Cancelar</button><button class="btn prim" value="ok">${novo ? 'Incluir' : 'Salvar'}</button>
       </div>
@@ -2743,26 +2706,12 @@ function ligarSimular() {
     const sub = raiz.querySelector('[data-sim-ate-sub]');
     if (sub) sub.innerHTML = SIM.ate && SIM.ate < hojeISO() ? '<button type="button" id="sim-ate-hoje">voltar para hoje</button>' : 'último dia: hoje';
   };
-  const fecharCalendarios = () => raiz.querySelectorAll('[data-sim-data]').forEach((campo) => {
-    const cal = $('[data-sim-calendario]', campo);
-    if (cal) cal.hidden = true;
-    $('input', campo)?.setAttribute('aria-expanded', 'false');
-  });
-  const abrirCalendario = (id, ano, mes) => {
-    const campo = raiz.querySelector(`[data-sim-data="${id}"]`);
-    if (!campo) return;
-    fecharCalendarios();
-    const input = $('input', campo), cal = $('[data-sim-calendario]', campo);
-    cal.innerHTML = htmlCalendarioSim(id, input.value, ano, mes);
-    cal.hidden = false;
-    input.setAttribute('aria-expanded', 'true');
-  };
   const guardarData = (id, iso) => {
-    if (id === 'sim-de') SIM.de = iso;
-    else SIM.ate = iso >= hojeISO() ? '' : iso;
+    if (id === 'sim-de') {
+      SIM.de = iso;
+      $('#sim-ate', raiz).min = iso; // o fim não pode vir antes do início
+    } else SIM.ate = iso >= hojeISO() ? '' : iso;
     salvarSim();
-    const input = raiz.querySelector(`#${id}`);
-    if (input) input.value = dataBR(id === 'sim-ate' && !SIM.ate ? hojeISO() : iso);
     if (id === 'sim-ate') atualizarAtalhoHoje();
   };
   const redesenharCarteira = (ci) => {
@@ -2787,7 +2736,6 @@ function ligarSimular() {
   raiz.addEventListener('input', (e) => {
     const t = e.target;
     if (t.id === 'sim-de' || t.id === 'sim-ate') return;
-    if (t.dataset.simCalAno != null) return;
     if (t.dataset.apelido != null) {
       const ci = Number(t.dataset.apelido);
       SIM.carteiras[ci].apelido = t.value; salvarSim();
@@ -2804,16 +2752,7 @@ function ligarSimular() {
   });
   raiz.addEventListener('change', (e) => {
     const t = e.target;
-    if (t.dataset.simCalMes != null) {
-      const campo = t.closest('[data-sim-data]');
-      abrirCalendario(campo.dataset.simData, Number($('[data-sim-cal-ano]', campo).value), Number(t.value));
-      return;
-    }
-    if (t.dataset.simCalAno != null) {
-      const campo = t.closest('[data-sim-data]');
-      if (/^\d{1,6}$/.test(t.value)) abrirCalendario(campo.dataset.simData, Number(t.value), Number($('[data-sim-cal-mes]', campo).value));
-      return;
-    }
+    if (t.id === 'sim-de' || t.id === 'sim-ate') { if (t.value) guardarData(t.id, t.value); return; }
     if (t.dataset.dia != null) { SIM.carteiras[t.dataset.dia].dia = t.value; salvarSim(); return; }
     if (t.dataset.campo !== 'tipo') return;
     const row = t.closest('.sim-item');
@@ -2824,32 +2763,12 @@ function ligarSimular() {
     salvarSim(); redesenharCarteira(row.dataset.c);
   });
   raiz.addEventListener('click', (e) => {
-    if (!e.target.closest('[data-sim-data]')) fecharCalendarios();
     const cardAp = e.target.closest('[data-edit-aporte]');
     if (cardAp) { abrirEditarAporteSim(cardAp.dataset.editAporte); return; }
     const slot = e.target.closest('[data-g-slot]');
     if (slot) { SIM_G.sel = Number(slot.dataset.gSlot); desenharBarrasSim(); return; }
     const t = e.target.closest('button');
     if (!t) return;
-    if (t.dataset.simDataAbrir) { abrirCalendario(t.dataset.simDataAbrir); return; }
-    if (t.dataset.simCalNav) {
-      const campo = t.closest('[data-sim-data]');
-      const ano = Number($('[data-sim-cal-ano]', campo).value), mes = Number($('[data-sim-cal-mes]', campo).value) + Number(t.dataset.simCalNav);
-      abrirCalendario(campo.dataset.simData, ano + Math.floor(mes / 12), (mes + 12) % 12);
-      return;
-    }
-    if (t.dataset.simCalDia) {
-      const campo = t.closest('[data-sim-data]');
-      guardarData(campo.dataset.simData, t.dataset.simCalDia);
-      fecharCalendarios();
-      return;
-    }
-    if (t.hasAttribute('data-sim-cal-hoje')) {
-      const campo = t.closest('[data-sim-data]');
-      guardarData(campo.dataset.simData, hojeISO());
-      fecharCalendarios();
-      return;
-    }
     if (t.hasAttribute('data-escolher')) {
       const row = t.closest('.sim-item');
       const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
@@ -2866,7 +2785,7 @@ function ligarSimular() {
       return;
     }
     if (t.dataset.desfazer != null) { const c = SIM.carteiras[t.dataset.desfazer]; c.edicoes = {}; c.extras = []; salvarSim(); redesenharCarteira(t.dataset.desfazer); if (SIM_RES) rodarSimulacao({ rolar: false }); return; }
-    if (t.id === 'sim-ate-hoje') { SIM.ate = ''; salvarSim(); render(); return; }
+    if (t.id === 'sim-ate-hoje') { SIM.ate = ''; salvarSim(); $('#sim-ate', raiz).value = hojeISO(); atualizarAtalhoHoje(); return; }
     if (t.dataset.modoProv) { SIM.carteiras[t.dataset.c].proventos = t.dataset.modoProv; salvarSim(); redesenharCarteira(t.dataset.c); return; }
     if (t.dataset.preco) { SIM.carteiras[t.dataset.c].preco = t.dataset.preco; salvarSim(); redesenharCarteira(t.dataset.c); return; }
     if (t.dataset.comparar) { SIM.comparar = t.dataset.comparar === 'true'; salvarSim(); render(); return; }
@@ -2911,23 +2830,6 @@ function ligarSimular() {
       return;
     }
     if (t.id === 'sim-rodar') rodarSimulacao();
-  });
-  raiz.addEventListener('blur', (e) => {
-    const t = e.target;
-    if (t.id !== 'sim-de' && t.id !== 'sim-ate') return;
-    const iso = lerDataDigitada(t.value);
-    if (!iso) {
-      t.value = dataBR(t.id === 'sim-de' ? SIM.de : (SIM.ate || hojeISO()));
-      if (String(e.relatedTarget?.dataset?.simCalDia || '') === '') toast('Digite a data no formato dd/mm/aaaa.');
-      return;
-    }
-    guardarData(t.id, iso);
-  }, true);
-  raiz.addEventListener('keydown', (e) => {
-    const t = e.target;
-    if (t.id !== 'sim-de' && t.id !== 'sim-ate') return;
-    if (e.key === 'Enter') { e.preventDefault(); t.blur(); }
-    if (e.key === 'Escape') { t.value = dataBR(t.id === 'sim-de' ? SIM.de : (SIM.ate || hojeISO())); fecharCalendarios(); }
   });
   desenharGraficosSim();
 }
@@ -2986,7 +2888,7 @@ function renderAjustes() {
       </div>
     </section>
 
-    <section class="bloco">
+    <section class="bloco" id="importar-b3">
       <h2>Importar extrato da B3</h2>
       <p class="dica">Uma vez por mês, traga os proventos e as compras do mês. Pode repetir meses sem medo: o que já está no app é pulado.</p>
       <ol class="passos">
@@ -3044,7 +2946,7 @@ function renderAjustes() {
           <label class="btn peq" for="bk-importar">Importar backup</label>
           <input type="file" id="bk-importar" accept="application/json,.json" hidden>
           <span class="esp"></span>
-          <button type="button" class="btn peq perigo" id="bk-apagar">Apagar tudo</button>
+          <button type="button" class="btn peq perigo" id="bk-apagar">${ICONE_LIXO}<span>Apagar tudo</span></button>
         </div>
         <p class="dica">Importar um backup substitui tudo${N.ativa() ? ', aqui e na nuvem' : ''}.</p>
       </details>
@@ -3283,7 +3185,7 @@ function ligarAjustes() {
   });
   const apagar = $('#bk-apagar');
   apagar.addEventListener('click', () => {
-    if (!apagar.dataset.ok) { apagar.dataset.ok = '1'; apagar.textContent = 'Tem certeza? Toque de novo'; setTimeout(() => { if (apagar.isConnected) { delete apagar.dataset.ok; apagar.textContent = 'Apagar tudo'; } }, 4000); return; }
+    if (!apagar.dataset.ok) { apagar.dataset.ok = '1'; apagar.classList.add('confirmar'); $('span', apagar).textContent = 'Tem certeza? Toque de novo'; setTimeout(() => { if (apagar.isConnected) { delete apagar.dataset.ok; apagar.classList.remove('confirmar'); $('span', apagar).textContent = 'Apagar tudo'; } }, 4000); return; }
     S = resetar(); persist(); N.substituirTudo(paraNuvem(S)); render(); toast(N.ativa() ? 'Dados apagados aqui e na nuvem.' : 'Dados apagados.');
   });
   ligarConta($('.conta-bloco'));
@@ -3369,7 +3271,7 @@ function ligarConta(raiz) {
 
 function abrirConta() {
   const dlg = $('#dlg-conta');
-  dlg.innerHTML = `<div class="conta-dlg">${htmlConta()}<button type="button" class="x fechar" data-conta="fechar" aria-label="Fechar">✕</button></div>`;
+  dlg.innerHTML = `<div class="conta-dlg">${htmlConta()}<button type="button" class="ic-btn fechar" data-conta="fechar" aria-label="Fechar">${ICONE_LIMPAR}</button></div>`;
   dlg.showModal();
   dlg.querySelector('#nv-senha')?.focus();
 }
@@ -3396,7 +3298,7 @@ function renderNuvem() {
   // painel de conta aberto acompanha o estado
   const dlg = $('#dlg-conta');
   if (dlg.open && !dlg.contains(document.activeElement?.closest?.('form') || null)) {
-    dlg.querySelector('.conta-dlg').innerHTML = `${htmlConta()}<button type="button" class="x fechar" data-conta="fechar" aria-label="Fechar">✕</button>`;
+    dlg.querySelector('.conta-dlg').innerHTML = `${htmlConta()}<button type="button" class="ic-btn fechar" data-conta="fechar" aria-label="Fechar">${ICONE_LIMPAR}</button>`;
   }
   const bloco = $('.conta-bloco');
   if (bloco && !bloco.contains(document.activeElement)) bloco.innerHTML = htmlConta();
@@ -3425,12 +3327,24 @@ function render() {
   renderNuvem();
 }
 
-window.addEventListener('hashchange', () => { render(); window.scrollTo({ top: 0 }); });
+// links das telas vazias: "Importar da B3" abre Ajustes já no lugar certo; "Entrar" abre a conta
+let rolarPara = null;
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('[data-rolar]');
+  if (a) rolarPara = a.dataset.rolar;
+  if (e.target.closest('[data-entrar]')) abrirConta();
+});
+window.addEventListener('hashchange', () => {
+  render();
+  const alvo = rolarPara && document.getElementById(rolarPara);
+  rolarPara = null;
+  if (alvo) alvo.scrollIntoView({ block: 'start' }); else window.scrollTo({ top: 0 });
+});
 N.aoMudar(renderNuvem);
 
-/** Todo ativo que você tem em carteira aparece na lista, mesmo se foi tirado dela. */
+/** Todo ativo que você tem em carteira aparece na lista, a não ser que você o tenha tirado dela. */
 function garantirAtivosDaCarteira() {
-  const tem = new Set(S.ativos.map((a) => a.ticker));
+  const tem = new Set([...S.ativos.map((a) => a.ticker), ...(S.ajustes.foraDaLista || [])]);
   const emCarteira = new Set(carteira(S.compras, [], []).linhas.map((l) => l.ticker)); // vendidos por inteiro não voltam
   let mudou = false;
   for (const c of S.compras) {

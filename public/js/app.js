@@ -232,6 +232,7 @@ function htmlOrdem(a, pos) {
           <button type="button" data-mais="${a.id}" aria-label="Mais ${esc(a.ticker)}">+</button>
         </div>
         <button type="button" class="max" data-max="${a.id}" title="Usar o que falta">MÁX</button>
+        <button type="button" class="icone-btn limpar-qtd perigo" data-limpar-qtd="${a.id}" title="Zerar somente ${esc(a.ticker)}" aria-label="Zerar somente ${esc(a.ticker)}">${ICONE_LIXO}</button>
       </div>
       <div class="o-total" data-total="${a.id}"></div>
       <button type="button" class="x x-del" data-del-ativo="${a.id}" title="Tirar ${esc(a.ticker)} da lista" aria-label="Tirar ${esc(a.ticker)} da lista">✕</button>
@@ -452,6 +453,8 @@ function ligarComprar() {
       const q = qtdMaxima(a, Number(S.plano.qtds[id]) || 0, rest, b);
       setQtd(id, q);
       if (!q) toast(`Não sobra dinheiro para ${a.ticker}.`);
+    } else if (t.dataset.limparQtd) {
+      setQtd(t.dataset.limparQtd, 0);
     }
   });
   ligarRemover('data-del-ativo', 'ativos');
@@ -634,30 +637,33 @@ function abrirDividir() {
   if (!ativos.length) { toast('Adicione ativos primeiro.'); return; }
   const salvos = S.ajustes.pcts || {};
   const pcts = Object.fromEntries(ativos.map((a) => [a.ticker, Number(salvos[a.ticker]) || 0]));
+  const selecionados = new Set(ativos.filter((a) => a.preco > 0).map((a) => a.id));
   let valor = disponivel();
   const dlg = $('#dlg-compra');
   const fmtPc = (v) => (v ? String(round2(v)).replace('.', ',') : '');
   dlg.innerHTML = `
     <form method="dialog" class="form-edit dividir-form">
       <h2>Dividir a compra</h2>
-      <p class="dica">Diga quanto de cada ativo você quer. O app calcula quantas cotas cabem em cada parte, já com as taxas do ${esc(b.nome)}.</p>
+      <p class="dica">Marque os ativos que entram nesta compra e diga quanto vai para cada um. O app calcula quantas cotas cabem em cada parte, já com as taxas do ${esc(b.nome)}.</p>
       <label class="campo dv-valor"><span>Valor para dividir</span><input id="dv-valor" class="num" inputmode="decimal" value="${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"><span class="sub">aporte + proventos: ${R(disponivel())}</span></label>
       <div class="dv-atalhos"><button type="button" class="btn peq" id="dv-igual">Partes iguais</button><button type="button" class="btn peq" id="dv-zerar">Zerar %</button></div>
       <div class="dv-lista">${ativos.map((a) => `<div class="dv-item" data-tk="${esc(a.ticker)}">
+        <label class="dv-check" title="Incluir ${esc(a.ticker)} na compra"><input type="checkbox" data-dv-incluir="${a.id}" aria-label="Incluir ${esc(a.ticker)} na compra" ${selecionados.has(a.id) ? 'checked' : ''} ${a.preco > 0 ? '' : 'disabled'}></label>
         ${htmlLogo(a)}
         <span class="dv-nome"><b>${esc(a.ticker)}</b><small>${a.preco > 0 ? R(a.preco) : 'sem preço'}</small></span>
-        <span class="dv-pc"><input class="num" inputmode="decimal" data-pc="${esc(a.ticker)}" value="${fmtPc(pcts[a.ticker])}" placeholder="0" aria-label="% em ${esc(a.ticker)}" ${a.preco > 0 ? '' : 'disabled'}><small>%</small></span>
+        <span class="dv-pc"><input class="num" inputmode="decimal" data-pc="${esc(a.ticker)}" value="${fmtPc(pcts[a.ticker])}" placeholder="0" aria-label="% em ${esc(a.ticker)}" ${selecionados.has(a.id) && a.preco > 0 ? '' : 'disabled'}><small>%</small></span>
         <span class="dv-res num" data-res="${esc(a.ticker)}"></span>
       </div>`).join('')}</div>
       <div class="dv-rodape" id="dv-rodape"></div>
       <div class="acoes"><span class="esp"></span><button class="btn" value="cancelar" formnovalidate>Cancelar</button><button class="btn prim" value="ok">Usar na compra</button></div>
     </form>`;
   const pintar = () => {
-    const d = distribuirPorPct(ativos, pcts, valor, b);
+    const d = distribuirPorPct(ativos.filter((a) => selecionados.has(a.id)), pcts, valor, b);
     for (const l of d.linhas) {
       const el = dlg.querySelector(`[data-res="${CSS.escape(l.a.ticker)}"]`);
       el.innerHTML = l.pc > 0 && l.a.preco > 0 ? `<b>${fmtQtd(l.q)} ${unidade(l.a.tipo, l.q)}</b><small>${R(l.total)} de ${R(l.verba)}</small>` : '<small>—</small>';
     }
+    for (const a of ativos.filter((a) => !selecionados.has(a.id))) dlg.querySelector(`[data-res="${CSS.escape(a.ticker)}"]`).innerHTML = '<small>não incluído</small>';
     const ok = Math.abs(d.soma - 100) < 0.01;
     const usado = d.linhas.reduce((s2, l) => s2 + l.total, 0);
     $('#dv-rodape', dlg).innerHTML = `<span class="${ok ? '' : d.soma > 100 ? 'var-baixa' : 'dv-falta'}">Soma <b>${fmtPct0(d.soma)}</b>${ok ? '' : d.soma > 100 ? ' — passou de 100%' : ` — faltam ${fmtPct0(100 - d.soma)}`}</span><span>Na compra <b>${R(usado)}</b> · sobra <b>${R(valor - usado)}</b></span>`;
@@ -668,17 +674,29 @@ function abrirDividir() {
     if (e.target.dataset.pc) pcts[e.target.dataset.pc] = Math.max(0, num(e.target.value) || 0);
     pintar();
   };
-  dlg.onchange = null;
-  const repor = () => { dlg.querySelectorAll('[data-pc]').forEach((i) => { i.value = fmtPc(pcts[i.dataset.pc]); }); pintar(); };
+  dlg.onchange = (e) => {
+    const id = e.target.dataset.dvIncluir;
+    if (!id) return;
+    e.target.checked ? selecionados.add(id) : selecionados.delete(id);
+    repor();
+  };
+  const repor = () => {
+    dlg.querySelectorAll('[data-pc]').forEach((i) => {
+      const a = ativos.find((x) => x.ticker === i.dataset.pc);
+      i.value = fmtPc(pcts[i.dataset.pc]);
+      i.disabled = !a || !selecionados.has(a.id) || !(a.preco > 0);
+    });
+    pintar();
+  };
   $('#dv-igual', dlg).addEventListener('click', () => {
-    const com = ativos.filter((a) => a.preco > 0);
+    const com = ativos.filter((a) => selecionados.has(a.id) && a.preco > 0);
     com.forEach((a, i) => { pcts[a.ticker] = i < com.length - 1 ? Math.floor(10000 / com.length) / 100 : round2(100 - Math.floor(10000 / com.length) / 100 * (com.length - 1)); });
     repor();
   });
   $('#dv-zerar', dlg).addEventListener('click', () => { for (const k of Object.keys(pcts)) pcts[k] = 0; repor(); });
   dlg.onclose = () => {
     if (dlg.returnValue !== 'ok') return;
-    const d = distribuirPorPct(ativos, pcts, valor, b);
+    const d = distribuirPorPct(ativos.filter((a) => selecionados.has(a.id)), pcts, valor, b);
     S.plano.qtds = {};
     for (const l of d.linhas) if (l.q > 0) S.plano.qtds[l.a.id] = l.q;
     S.ajustes.pcts = Object.fromEntries(Object.entries(pcts).filter(([, v]) => v > 0));
@@ -1420,7 +1438,7 @@ function htmlPorTipo(c) {
 
 function renderCarteira() {
   if (!S.compras.length) {
-    return `<section class="bloco"><div class="vazio"><h2>Sua carteira aparece aqui</h2><p>Depois de comprar no banco, toque em <b>Comprei — registrar</b> na tela inicial. Aqui você vê cotas, preço médio, quanto investiu e o retorno.</p><a class="btn prim" href="#comprar">Ir para Comprar</a></div></section>`;
+    return `<section class="bloco"><div class="vazio"><h2>Seu histórico aparece aqui</h2><p>Registre uma compra em <b>Comprar</b> depois de investir, ou importe suas operações da B3 em <b>Ajustes</b>. Aqui você acompanha cotas, preço médio, valor investido e retorno.</p><div class="acoes"><a class="btn prim" href="#comprar">Ir para Comprar</a><a class="btn" href="#ajustes">Importar dados da B3</a></div></div></section>`;
   }
   const db = dadosDoBanco(); // com um banco escolhido, os números de cima são só dele
   const c = carteira(db.compras, S.ativos, db.proventos);
@@ -1552,6 +1570,7 @@ function ligarRemover(attr, colecao) {
 // ---------- aba Proventos ----------
 let PV_ANO = null; // ano escolhido no resumo ('tudo' = todos)
 let PV_MES = null; // mês dentro do ano ('2026-10'), ou null para o ano todo
+let PV_ATIVO = null; // ativo escolhido para lançar o próximo provento
 
 /** Uma linha de barra empilhada com as fatias de cada tipo. */
 const barraTipos = (por, total) => `<div class="pv-barra" role="img" aria-label="Proventos por tipo">${TIPOS_PROV_ORDEM.filter((k) => por[k] > 0).map((k) => `<i class="pv-${k}" style="width:${(por[k] / total) * 100}%"></i>`).join('')}</div>`;
@@ -1576,6 +1595,13 @@ function htmlCardProvento(x) {
 
 
 /** Deixa à vista o ano e o mês escolhidos nas faixas que rolam para o lado. */
+function htmlEscolhaAtivoProvento(a) {
+  const ativo = a || { ticker: '', nome: '', classe: 'acao' };
+  return ativo.ticker
+    ? `${htmlLogo({ ticker: ativo.ticker, tipo: ativo.classe || 'acao' })}<span class="sa-txt"><b>${esc(ativo.ticker)}</b><small>${esc(ativo.nome || nomeDoAtivo(ativo.ticker) || '')}</small></span>`
+    : '<span class="sa-txt"><b>Escolher ativo</b><small>buscar por nome ou código</small></span>';
+}
+
 function centralizarFiltrosPv() {
   document.querySelectorAll('.pv-resumo .seg-rola').forEach((faixa) => {
     const b = faixa.querySelector('[aria-pressed="true"]');
@@ -1697,20 +1723,25 @@ function htmlResumoProventos() {
 
 function renderProventos() {
   const tickers = [...new Set([...S.ativos.map((a) => a.ticker), ...S.compras.map((c) => c.ticker)])];
+  const ativoPadrao = tickers[0] ? { ticker: tickers[0], nome: nomeDoAtivo(tickers[0]), classe: S.ativos.find((a) => a.ticker === tickers[0])?.tipo || S.compras.find((c) => c.ticker === tickers[0])?.tipo || 'acao' } : null;
+  const ativoProvento = PV_ATIVO || ativoPadrao;
   const porMes = groupBy([...S.proventos].sort((a, b) => b.data.localeCompare(a.data)), (x) => mesDe(x.data));
   const mesAnt = mesAnterior(mesDe(hojeISO()));
+  const semAtivos = !tickers.length;
   return `
-    <section class="bloco">
+    ${semAtivos ? `<section class="bloco"><div class="vazio"><h2>Seus proventos aparecem aqui</h2><p>Dividendos, JCP e rendimentos de FIIs entram na data em que caem na conta. Primeiro registre uma compra ou importe as operações da B3 em Ajustes; depois você poderá lançar cada pagamento.</p><div class="acoes"><a class="btn prim" href="#comprar">Registrar compra</a><a class="btn" href="#ajustes">Importar dados da B3</a></div></div></section>` : ''}
+    <section class="bloco" ${semAtivos ? 'hidden' : ''}>
       <div class="bloco-cab"><h2>Lançar provento</h2><small>O total de ${nomeMes(mesAnt)} entra sozinho no aporte de ${nomeMes(mesDe(hojeISO()))}</small></div>
       <form id="form-prov" class="campos">
-        <label class="campo"><span>Data do pagamento</span><input type="date" id="pv-data" value="${hojeISO()}" required></label>
-        <label class="campo"><span>Ativo</span><select id="pv-ticker" required>${tickers.map((t) => `<option>${esc(t)}</option>`).join('')}</select></label>
+        <label class="campo"><span>Data do pagamento</span>${htmlDataSim('pv-data', hojeISO(), 'Data do pagamento')}</label>
+        <label class="campo"><span>Ativo</span><button type="button" class="sim-ativo-btn" id="pv-escolher" aria-label="Escolher ativo para o provento">${htmlEscolhaAtivoProvento(ativoProvento)}</button></label>
         <label class="campo"><span>Tipo</span><select id="pv-tipo">${Object.entries(TIPOS_PROVENTO).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
         <label class="campo"><span>Valor recebido (R$)</span><input id="pv-valor" class="num" inputmode="decimal" placeholder="0,00" required></label>
         <div class="campo-acao"><button class="btn prim" type="submit">Lançar</button></div>
       </form>
     </section>
 
+    ${!semAtivos && !S.proventos.length ? `<section class="bloco"><div class="vazio"><h2>Ainda não há proventos lançados</h2><p>Quando um dividendo, JCP ou rendimento de FII for pago, informe o valor e a data acima. Ele aparecerá aqui e poderá compor o aporte do mês seguinte.</p></div></section>` : ''}
     ${htmlResumoProventos()}
 
     ${S.proventos.length ? `<section class="bloco"><h2>Recebidos</h2>
@@ -1758,18 +1789,67 @@ function abrirEditarProvento(id) {
   dlg.showModal();
 }
 
-function ligarProventos() {
-  const sel = $('#pv-ticker'), tipo = $('#pv-tipo');
-  const sugerir = () => {
-    const a = S.ativos.find((x) => x.ticker === sel.value) || { tipo: S.compras.find((c) => c.ticker === sel.value)?.tipo };
-    tipo.value = a?.tipo === 'fii' ? 'rendimento' : a?.tipo === 'tesouro' ? 'juros' : 'dividendo';
+function ligarDataProvento() {
+  const raiz = $('#conteudo');
+  const campo = raiz.querySelector('[data-sim-data="pv-data"]');
+  if (!campo) return;
+  const input = $('#pv-data', campo), cal = $('[data-sim-calendario]', campo);
+  const fechar = () => { cal.hidden = true; input.setAttribute('aria-expanded', 'false'); };
+  const abrir = (ano, mes) => {
+    cal.innerHTML = htmlCalendarioSim('pv-data', input.value, ano, mes);
+    cal.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
   };
-  sel.addEventListener('change', sugerir); sugerir();
+  raiz.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-sim-data="pv-data"]')) fechar();
+    const t = e.target.closest('button');
+    if (!t) return;
+    if (t.dataset.simDataAbrir === 'pv-data') { abrir(); return; }
+    if (t.dataset.simCalNav) {
+      const ano = Number($('[data-sim-cal-ano]', campo).value), mes = Number($('[data-sim-cal-mes]', campo).value) + Number(t.dataset.simCalNav);
+      abrir(ano + Math.floor(mes / 12), (mes + 12) % 12); return;
+    }
+    if (t.dataset.simCalDia) { input.value = dataBR(t.dataset.simCalDia); fechar(); return; }
+    if (t.hasAttribute('data-sim-cal-hoje')) { input.value = dataBR(hojeISO()); fechar(); }
+  });
+  raiz.addEventListener('change', (e) => {
+    if (e.target.dataset.simCalMes != null) abrir(Number($('[data-sim-cal-ano]', campo).value), Number(e.target.value));
+    if (e.target.dataset.simCalAno != null && /^\d{1,6}$/.test(e.target.value)) abrir(Number(e.target.value), Number($('[data-sim-cal-mes]', campo).value));
+  });
+  input.addEventListener('blur', () => {
+    const iso = lerDataDigitada(input.value);
+    input.value = dataBR(iso || hojeISO());
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); input.blur(); } if (e.key === 'Escape') { input.value = dataBR(hojeISO()); fechar(); } });
+}
+
+function ligarProventos() {
+  const escolher = $('#pv-escolher'), tipo = $('#pv-tipo');
+  if (!escolher) return;
+  ligarDataProvento();
+  const ativo = () => PV_ATIVO || (() => {
+    const ticker = [...new Set([...S.ativos.map((a) => a.ticker), ...S.compras.map((c) => c.ticker)])][0];
+    return ticker ? { ticker, nome: nomeDoAtivo(ticker), classe: S.ativos.find((a) => a.ticker === ticker)?.tipo || S.compras.find((c) => c.ticker === ticker)?.tipo || 'acao' } : null;
+  })();
+  const sugerir = () => {
+    const a = ativo();
+    tipo.value = a?.classe === 'fii' ? 'rendimento' : a?.classe === 'tesouro' ? 'juros' : 'dividendo';
+  };
+  escolher.addEventListener('click', () => abrirEscolherAtivo((a) => {
+    PV_ATIVO = a;
+    escolher.innerHTML = htmlEscolhaAtivoProvento(a);
+    sugerir();
+  }));
+  sugerir();
   $('#form-prov').addEventListener('submit', (e) => {
     e.preventDefault();
     const v = num($('#pv-valor').value);
     if (!Number.isFinite(v) || v <= 0) { toast('Informe o valor recebido.'); return; }
-    const p = { id: uid(), data: $('#pv-data').value || hojeISO(), ticker: sel.value, tipo: tipo.value, valor: round2(v) };
+    const data = lerDataDigitada($('#pv-data').value);
+    if (!data) { toast('Digite uma data válida no formato dd/mm/aaaa.'); $('#pv-data').focus(); return; }
+    const a = ativo();
+    if (!a?.ticker) { toast('Escolha o ativo.'); return; }
+    const p = { id: uid(), data, ticker: a.ticker, tipo: tipo.value, valor: round2(v) };
     S.proventos.push(p);
     N.adicionarProvento(p);
     persist(); render(); toast('Provento lançado.');
@@ -1869,6 +1949,7 @@ function composicaoCart(c) {
 /** Etiqueta da carteira: a letra na cor dela + o nome. curto = o nome corta com reticências. */
 const tagCart = (i, nome, curto = false) => `<span class="sim-tag sim-tag-${CORES_SIM[i]} ${curto ? 'curto' : ''}" title="${esc(nome)}"><i>${LETRAS_SIM[i]}</i><span>${esc(nome)}</span></span>`;
 const pesoSoma = (c) => c.itens.reduce((s, it) => s + (Number(it.peso) || 0), 0);
+const itemEscolhidoSim = (it) => it.tipo !== 'bolsa' || Boolean(it.ticker);
 const fmtPct0 = (v) => `${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
 const temBolsaSim = (c) => c.itens.some((it) => it.tipo === 'bolsa');
 /** Nas tabelas que viram cartões no celular, o conteúdo de cada célula fica junto, à direita do rótulo. */
@@ -1889,13 +1970,14 @@ function htmlItemSim(it, ci, ii) {
     <span class="sim-tipo"><select data-campo="tipo" aria-label="Tipo">${Object.entries(TIPOS_SIM).map(([k, v]) => `<option value="${k}" ${k === it.tipo ? 'selected' : ''}>${esc(v.nome)}</option>`).join('')}</select></span>
     ${meio}
     <span class="sim-peso"><input class="num" data-campo="peso" inputmode="decimal" value="${esc(String(it.peso ?? '').replace('.', ','))}" aria-label="Percentual do aporte"><small>%</small></span>
-    <button type="button" class="icone-btn sim-tirar" data-tirar aria-label="Tirar">${ICONE_LIXO}</button>
+    <button type="button" class="icone-btn sim-tirar perigo" data-tirar aria-label="Tirar">${ICONE_LIXO}</button>
   </div>`;
 }
 
 function htmlCarteiraSim(c, ci) {
   const soma = pesoSoma(c);
   const bolsa = temBolsaSim(c);
+  const qtdEscolhidos = c.itens.filter(itemEscolhidoSim).length;
   return `<section class="bloco sim-carteira sim-${CORES_SIM[ci]}" data-carteira="${ci}">
     <div class="bloco-cab"><h2 class="sim-cart-tit" data-titulo="${ci}">${tagCart(ci, nomeCart(c, ci))}<button type="button" class="ic-btn" data-renomear="${ci}" title="Dar um nome" aria-label="Dar um nome à carteira ${LETRAS_SIM[ci]}">${ICONE_EDITAR}</button></h2>
       <small class="sim-soma ${Math.abs(soma - 100) < 0.01 ? '' : 'var-baixa'}" data-soma="${ci}">${Math.abs(soma - 100) < 0.01 ? 'soma 100%' : `soma ${fmtPct0(soma)} — o app divide na proporção`}</small></div>
@@ -1913,7 +1995,7 @@ function htmlCarteiraSim(c, ci) {
       <div class="sim-itens-cab" aria-hidden="true"><span>Onde investir</span><span></span><span>% do aporte</span><span></span></div>
       ${c.itens.map((it, ii) => htmlItemSim(it, ci, ii)).join('')}
     </div>
-    <div><button type="button" class="btn peq" data-add="${ci}">+ Investimento</button></div>
+    <div class="sim-itens-acoes">${qtdEscolhidos >= 2 ? `<button type="button" class="btn peq" data-dividir-igual="${ci}">Dividir igualmente</button>` : ''}<button type="button" class="btn peq" data-add="${ci}">+ Investimento</button></div>
     ${bolsa ? `<div class="sim-opcoes">
       <div class="sim-op">
         <span class="sim-op-tit">Proventos (dividendos, JCP, rendimentos)</span>
@@ -2487,6 +2569,11 @@ function htmlPeriodosSim() {
 const iconeCalendarioSim = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/></svg>';
 const nomesMesesSim = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 const diasSemanaSim = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+const anosCalendarioSim = (ano) => {
+  const minimo = Math.min(1900, ano);
+  const maximo = Math.max(Number(hojeISO().slice(0, 4)) + 20, ano);
+  return Array.from({ length: maximo - minimo + 1 }, (_, i) => maximo - i);
+};
 
 function htmlDataSim(id, valor, rotulo) {
   return `<span class="sim-data" data-sim-data="${id}">
@@ -2514,7 +2601,7 @@ function htmlCalendarioSim(id, valor, ano = null, mes = null) {
   }).join('');
   return `<div class="sim-cal-topo">
     <button type="button" class="sim-cal-nav" data-sim-cal-nav="-1" aria-label="Mês anterior">‹</button>
-    <div class="sim-cal-escolhas"><select data-sim-cal-mes aria-label="Mês">${nomesMesesSim.map((nome, i) => `<option value="${i}" ${i === mes ? 'selected' : ''}>${nome}</option>`).join('')}</select><input type="number" data-sim-cal-ano value="${ano}" aria-label="Ano"></div>
+    <div class="sim-cal-escolhas"><select data-sim-cal-mes aria-label="Mês">${nomesMesesSim.map((nome, i) => `<option value="${i}" ${i === mes ? 'selected' : ''}>${nome}</option>`).join('')}</select><select data-sim-cal-ano aria-label="Ano">${anosCalendarioSim(ano).map((a) => `<option value="${a}" ${a === ano ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
     <button type="button" class="sim-cal-nav" data-sim-cal-nav="1" aria-label="Próximo mês">›</button>
   </div><div class="sim-cal-semana">${diasSemanaSim.map((dia) => `<span>${dia}</span>`).join('')}</div><div class="sim-cal-dias">${celulas}</div><div class="sim-cal-rodape"><button type="button" data-sim-cal-hoje>Hoje</button></div>`;
 }
@@ -2525,7 +2612,7 @@ function renderSimular() {
       <div class="bloco-cab"><h2>Simular aportes</h2><small>e se eu tivesse investido todo mês desde…</small></div>
       <div class="sim-config-linha">
         <label class="campo"><span>De</span>${htmlDataSim('sim-de', SIM.de, 'Data inicial')}<span class="sub">primeiro dia da simulação</span></label>
-        <label class="campo"><span>Até</span>${htmlDataSim('sim-ate', SIM.ate || hojeISO(), 'Data final')}<span class="sub">${SIM.ate && SIM.ate < hojeISO() ? '<button type="button" id="sim-ate-hoje">voltar para hoje</button>' : 'último dia: hoje'}</span></label>
+        <label class="campo"><span>Até</span>${htmlDataSim('sim-ate', SIM.ate || hojeISO(), 'Data final')}<span class="sub" data-sim-ate-sub>${SIM.ate && SIM.ate < hojeISO() ? '<button type="button" id="sim-ate-hoje">voltar para hoje</button>' : 'último dia: hoje'}</span></label>
         <div class="campo"><span>Simular</span>
           <div class="seg" role="group" aria-label="Quantas carteiras">${[[false, 'Uma carteira'], [true, 'Comparar duas']].map(([k, n]) => `<button type="button" data-comparar="${k}" aria-pressed="${Boolean(SIM.comparar) === k}">${n}</button>`).join('')}</div>
           <span class="sub">${SIM.comparar ? 'monte as duas e veja qual teria rendido mais' : `só ${esc(nomeCart(SIM.carteiras[0], 0))}`}</span></div>
@@ -2652,6 +2739,10 @@ function desenharGraficosSim({ fim = true } = {}) {
 
 function ligarSimular() {
   const raiz = $('#conteudo');
+  const atualizarAtalhoHoje = () => {
+    const sub = raiz.querySelector('[data-sim-ate-sub]');
+    if (sub) sub.innerHTML = SIM.ate && SIM.ate < hojeISO() ? '<button type="button" id="sim-ate-hoje">voltar para hoje</button>' : 'último dia: hoje';
+  };
   const fecharCalendarios = () => raiz.querySelectorAll('[data-sim-data]').forEach((campo) => {
     const cal = $('[data-sim-calendario]', campo);
     if (cal) cal.hidden = true;
@@ -2672,6 +2763,7 @@ function ligarSimular() {
     salvarSim();
     const input = raiz.querySelector(`#${id}`);
     if (input) input.value = dataBR(id === 'sim-ate' && !SIM.ate ? hojeISO() : iso);
+    if (id === 'sim-ate') atualizarAtalhoHoje();
   };
   const redesenharCarteira = (ci) => {
     const velho = raiz.querySelector(`[data-carteira="${ci}"]`);
@@ -2786,6 +2878,23 @@ function ligarSimular() {
       if (t.dataset.simCart) SIM_VISTA.cart = Number(t.dataset.simCart);
       if (t.dataset.simFiltro) SIM_VISTA.filtro = t.dataset.simFiltro;
       raiz.querySelector('.sim-periodos').outerHTML = htmlPeriodosSim();
+      return;
+    }
+    if (t.dataset.dividirIgual != null) {
+      const ci = Number(t.dataset.dividirIgual);
+      const c = SIM.carteiras[ci];
+      const escolhidos = c.itens.filter(itemEscolhidoSim);
+      if (escolhidos.length < 2) return;
+      const parte = Math.floor((10000 / escolhidos.length)) / 100;
+      let restante = 100;
+      let vistos = 0;
+      c.itens.forEach((it) => {
+        if (!itemEscolhidoSim(it)) { it.peso = 0; return; }
+        vistos += 1;
+        it.peso = vistos === escolhidos.length ? restante : parte;
+        restante = round2(restante - it.peso);
+      });
+      salvarSim(); redesenharCarteira(ci);
       return;
     }
     if (t.dataset.add != null) {

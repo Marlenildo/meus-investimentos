@@ -41,6 +41,15 @@ const nomeMes = (ym) => MESES[Number(ym.slice(5, 7)) - 1];
 const nomeMesAno = (ym) => `${nomeMes(ym)} de ${ym.slice(0, 4)}`;
 const mesCurto = (ym) => `${nomeMes(ym).slice(0, 3)}/${ym.slice(2, 4)}`;
 const dataBR = (iso) => iso ? iso.slice(0, 10).split('-').reverse().join('/') : '';
+const isoData = (ano, mes, dia) => `${String(ano).padStart(4, '0')}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+const lerDataDigitada = (valor) => {
+  const m = String(valor || '').trim().match(/^(?:(\d{2})\/(\d{2})\/(\d{4})|(\d{4})-(\d{2})-(\d{2}))$/);
+  if (!m) return null;
+  const [, diaBR, mesBR, anoBR, anoISO, mesISO, diaISO] = m;
+  const ano = Number(anoBR || anoISO), mes = Number(mesBR || mesISO), dia = Number(diaBR || diaISO);
+  const data = new Date(ano, mes - 1, dia);
+  return data.getFullYear() === ano && data.getMonth() === mes - 1 && data.getDate() === dia ? isoData(ano, mes - 1, dia) : null;
+};
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const $ = (sel, el = document) => el.querySelector(sel);
 const num = (v) => {
@@ -2475,13 +2484,48 @@ function htmlPeriodosSim() {
   </section>`);
 }
 
+const iconeCalendarioSim = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"/></svg>';
+const nomesMesesSim = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const diasSemanaSim = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+function htmlDataSim(id, valor, rotulo) {
+  return `<span class="sim-data" data-sim-data="${id}">
+    <input type="text" id="${id}" value="${dataBR(valor)}" inputmode="numeric" autocomplete="off" placeholder="dd/mm/aaaa" aria-label="${rotulo}" aria-haspopup="dialog" aria-expanded="false">
+    <button type="button" class="sim-data-abrir" data-sim-data-abrir="${id}" aria-label="Abrir calendário para ${rotulo}">${iconeCalendarioSim}</button>
+    <div class="sim-calendario" data-sim-calendario hidden></div>
+  </span>`;
+}
+
+function htmlCalendarioSim(id, valor, ano = null, mes = null) {
+  const base = lerDataDigitada(valor) || hojeISO();
+  const [anoBase, mesBase] = base.split('-').map(Number);
+  ano = Number.isInteger(ano) ? ano : anoBase;
+  mes = Number.isInteger(mes) ? mes : mesBase - 1;
+  const primeiroDia = new Date(ano, mes, 1).getDay();
+  const diasNoMes = new Date(ano, mes + 1, 0).getDate();
+  const anterior = new Date(ano, mes, 0).getDate();
+  const selecionada = lerDataDigitada(valor);
+  const celulas = Array.from({ length: 42 }, (_, i) => {
+    const dia = i - primeiroDia + 1;
+    if (dia < 1 || dia > diasNoMes) return `<span class="sim-cal-vazio" aria-hidden="true">${dia < 1 ? anterior + dia : dia - diasNoMes}</span>`;
+    const iso = isoData(ano, mes, dia);
+    const cls = iso === selecionada ? ' selecionado' : iso === hojeISO() ? ' hoje' : '';
+    return `<button type="button" class="sim-cal-dia${cls}" data-sim-cal-dia="${iso}" aria-label="${dataBR(iso)}" aria-pressed="${iso === selecionada}">${dia}</button>`;
+  }).join('');
+  return `<div class="sim-cal-topo">
+    <button type="button" class="sim-cal-nav" data-sim-cal-nav="-1" aria-label="Mês anterior">‹</button>
+    <div class="sim-cal-escolhas"><select data-sim-cal-mes aria-label="Mês">${nomesMesesSim.map((nome, i) => `<option value="${i}" ${i === mes ? 'selected' : ''}>${nome}</option>`).join('')}</select><input type="number" data-sim-cal-ano value="${ano}" aria-label="Ano"></div>
+    <button type="button" class="sim-cal-nav" data-sim-cal-nav="1" aria-label="Próximo mês">›</button>
+  </div><div class="sim-cal-semana">${diasSemanaSim.map((dia) => `<span>${dia}</span>`).join('')}</div><div class="sim-cal-dias">${celulas}</div><div class="sim-cal-rodape"><button type="button" data-sim-cal-hoje>Hoje</button></div>`;
+}
+
 function renderSimular() {
   return `
     <section class="bloco sim-config">
       <div class="bloco-cab"><h2>Simular aportes</h2><small>e se eu tivesse investido todo mês desde…</small></div>
       <div class="sim-config-linha">
-        <label class="campo"><span>De</span><input type="date" id="sim-de" value="${esc(SIM.de)}" min="2015-01-01" max="${hojeISO()}"><span class="sub">primeiro dia da simulação</span></label>
-        <label class="campo"><span>Até</span><input type="date" id="sim-ate" value="${esc(SIM.ate || hojeISO())}" min="2015-01-01" max="${hojeISO()}"><span class="sub">${SIM.ate && SIM.ate < hojeISO() ? '<button type="button" id="sim-ate-hoje">voltar para hoje</button>' : 'último dia: hoje'}</span></label>
+        <label class="campo"><span>De</span>${htmlDataSim('sim-de', SIM.de, 'Data inicial')}<span class="sub">primeiro dia da simulação</span></label>
+        <label class="campo"><span>Até</span>${htmlDataSim('sim-ate', SIM.ate || hojeISO(), 'Data final')}<span class="sub">${SIM.ate && SIM.ate < hojeISO() ? '<button type="button" id="sim-ate-hoje">voltar para hoje</button>' : 'último dia: hoje'}</span></label>
         <div class="campo"><span>Simular</span>
           <div class="seg" role="group" aria-label="Quantas carteiras">${[[false, 'Uma carteira'], [true, 'Comparar duas']].map(([k, n]) => `<button type="button" data-comparar="${k}" aria-pressed="${Boolean(SIM.comparar) === k}">${n}</button>`).join('')}</div>
           <span class="sub">${SIM.comparar ? 'monte as duas e veja qual teria rendido mais' : `só ${esc(nomeCart(SIM.carteiras[0], 0))}`}</span></div>
@@ -2608,6 +2652,27 @@ function desenharGraficosSim({ fim = true } = {}) {
 
 function ligarSimular() {
   const raiz = $('#conteudo');
+  const fecharCalendarios = () => raiz.querySelectorAll('[data-sim-data]').forEach((campo) => {
+    const cal = $('[data-sim-calendario]', campo);
+    if (cal) cal.hidden = true;
+    $('input', campo)?.setAttribute('aria-expanded', 'false');
+  });
+  const abrirCalendario = (id, ano, mes) => {
+    const campo = raiz.querySelector(`[data-sim-data="${id}"]`);
+    if (!campo) return;
+    fecharCalendarios();
+    const input = $('input', campo), cal = $('[data-sim-calendario]', campo);
+    cal.innerHTML = htmlCalendarioSim(id, input.value, ano, mes);
+    cal.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+  };
+  const guardarData = (id, iso) => {
+    if (id === 'sim-de') SIM.de = iso;
+    else SIM.ate = iso >= hojeISO() ? '' : iso;
+    salvarSim();
+    const input = raiz.querySelector(`#${id}`);
+    if (input) input.value = dataBR(id === 'sim-ate' && !SIM.ate ? hojeISO() : iso);
+  };
   const redesenharCarteira = (ci) => {
     const velho = raiz.querySelector(`[data-carteira="${ci}"]`);
     if (velho) velho.outerHTML = htmlCarteiraSim(SIM.carteiras[ci], ci);
@@ -2629,6 +2694,8 @@ function ligarSimular() {
   };
   raiz.addEventListener('input', (e) => {
     const t = e.target;
+    if (t.id === 'sim-de' || t.id === 'sim-ate') return;
+    if (t.dataset.simCalAno != null) return;
     if (t.dataset.apelido != null) {
       const ci = Number(t.dataset.apelido);
       SIM.carteiras[ci].apelido = t.value; salvarSim();
@@ -2636,8 +2703,6 @@ function ligarSimular() {
       return;
     }
     if (t.dataset.aporte != null) { SIM.carteiras[t.dataset.aporte].aporte = num(t.value) || 0; salvarSim(); return; }
-    if (t.id === 'sim-de') { if (t.value) { SIM.de = t.value; salvarSim(); } return; }
-    if (t.id === 'sim-ate') { if (t.value) { SIM.ate = t.value >= hojeISO() ? '' : t.value; salvarSim(); } return; }
     const row = t.closest('.sim-item');
     if (!row || t.dataset.campo === 'tipo') return;
     const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
@@ -2647,6 +2712,16 @@ function ligarSimular() {
   });
   raiz.addEventListener('change', (e) => {
     const t = e.target;
+    if (t.dataset.simCalMes != null) {
+      const campo = t.closest('[data-sim-data]');
+      abrirCalendario(campo.dataset.simData, Number($('[data-sim-cal-ano]', campo).value), Number(t.value));
+      return;
+    }
+    if (t.dataset.simCalAno != null) {
+      const campo = t.closest('[data-sim-data]');
+      if (/^\d{1,6}$/.test(t.value)) abrirCalendario(campo.dataset.simData, Number(t.value), Number($('[data-sim-cal-mes]', campo).value));
+      return;
+    }
     if (t.dataset.dia != null) { SIM.carteiras[t.dataset.dia].dia = t.value; salvarSim(); return; }
     if (t.dataset.campo !== 'tipo') return;
     const row = t.closest('.sim-item');
@@ -2657,12 +2732,32 @@ function ligarSimular() {
     salvarSim(); redesenharCarteira(row.dataset.c);
   });
   raiz.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-sim-data]')) fecharCalendarios();
     const cardAp = e.target.closest('[data-edit-aporte]');
     if (cardAp) { abrirEditarAporteSim(cardAp.dataset.editAporte); return; }
     const slot = e.target.closest('[data-g-slot]');
     if (slot) { SIM_G.sel = Number(slot.dataset.gSlot); desenharBarrasSim(); return; }
     const t = e.target.closest('button');
     if (!t) return;
+    if (t.dataset.simDataAbrir) { abrirCalendario(t.dataset.simDataAbrir); return; }
+    if (t.dataset.simCalNav) {
+      const campo = t.closest('[data-sim-data]');
+      const ano = Number($('[data-sim-cal-ano]', campo).value), mes = Number($('[data-sim-cal-mes]', campo).value) + Number(t.dataset.simCalNav);
+      abrirCalendario(campo.dataset.simData, ano + Math.floor(mes / 12), (mes + 12) % 12);
+      return;
+    }
+    if (t.dataset.simCalDia) {
+      const campo = t.closest('[data-sim-data]');
+      guardarData(campo.dataset.simData, t.dataset.simCalDia);
+      fecharCalendarios();
+      return;
+    }
+    if (t.hasAttribute('data-sim-cal-hoje')) {
+      const campo = t.closest('[data-sim-data]');
+      guardarData(campo.dataset.simData, hojeISO());
+      fecharCalendarios();
+      return;
+    }
     if (t.hasAttribute('data-escolher')) {
       const row = t.closest('.sim-item');
       const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
@@ -2707,6 +2802,23 @@ function ligarSimular() {
       return;
     }
     if (t.id === 'sim-rodar') rodarSimulacao();
+  });
+  raiz.addEventListener('blur', (e) => {
+    const t = e.target;
+    if (t.id !== 'sim-de' && t.id !== 'sim-ate') return;
+    const iso = lerDataDigitada(t.value);
+    if (!iso) {
+      t.value = dataBR(t.id === 'sim-de' ? SIM.de : (SIM.ate || hojeISO()));
+      if (String(e.relatedTarget?.dataset?.simCalDia || '') === '') toast('Digite a data no formato dd/mm/aaaa.');
+      return;
+    }
+    guardarData(t.id, iso);
+  }, true);
+  raiz.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (t.id !== 'sim-de' && t.id !== 'sim-ate') return;
+    if (e.key === 'Enter') { e.preventDefault(); t.blur(); }
+    if (e.key === 'Escape') { t.value = dataBR(t.id === 'sim-de' ? SIM.de : (SIM.ate || hojeISO())); fecharCalendarios(); }
   });
   desenharGraficosSim();
 }

@@ -14,7 +14,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.13.1';
+export const VERSAO = '1.13.2';
 const VERSAO_DATA = '2026-10-23';
 
 let S = carregar();
@@ -314,11 +314,11 @@ function renderComprar() {
       <div class="campos plano">
         <label class="campo"><span>Aporte de ${nomeMes(S.plano.mes)}</span>
           <input id="in-aporte" class="num" inputmode="decimal" value="${aporteMes().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}">
-          <span class="sub">padrão ${R(S.ajustes.aporteMensal)}</span>
+          <span class="sub">${S.plano.aporte != null && S.plano.aporte !== Number(S.ajustes.aporteMensal) ? `<button type="button" id="aporte-padrao">voltar ao padrão (${R(S.ajustes.aporteMensal)})</button>` : `padrão ${R(S.ajustes.aporteMensal)}`}</span>
         </label>
         <label class="campo"><span>+ Proventos de ${nomeMes(mesAnt)}</span>
           <input id="in-proventos" class="num" inputmode="decimal" value="${proventosMes().toLocaleString('pt-BR', { minimumFractionDigits: 2 })}">
-          <span class="sub">${manual ? `<button type="button" id="prov-auto">usar os lançados (${R(auto)})</button>` : 'soma dos proventos lançados'}</span>
+          <span class="sub">${manual && S.plano.proventosManual !== auto ? `<button type="button" id="prov-auto">usar os lançados (${R(auto)})</button>` : 'soma dos proventos lançados'}</span>
         </label>
         <div class="campo"><span>= Para investir</span><div class="disp-valor num" id="disp">${R(disponivel())}</div><span class="sub"></span></div>
       </div>
@@ -359,17 +359,16 @@ function renderComprar() {
 
 function ligarComprar() {
   const main = $('#conteudo');
-  const atualizarDisp = () => { $('#disp').textContent = R(disponivel()); renderBoleta(); };
 
   $('#in-aporte').addEventListener('change', (e) => {
     const v = num(e.target.value);
-    S.plano.aporte = Number.isFinite(v) ? Math.max(0, v) : null;
-    e.target.value = aporteMes().toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-    persist('plano'); atualizarDisp();
+    S.plano.aporte = Number.isFinite(v) ? Math.max(0, v) : 0; // apagar o campo = sem aporte este mês
+    persist('plano'); render();
   });
+  $('#aporte-padrao')?.addEventListener('click', () => { S.plano.aporte = null; persist('plano'); render(); });
   $('#in-proventos').addEventListener('change', (e) => {
     const v = num(e.target.value);
-    S.plano.proventosManual = Number.isFinite(v) ? Math.max(0, v) : null;
+    S.plano.proventosManual = Number.isFinite(v) ? Math.max(0, v) : 0; // apagar o campo = não usar os proventos este mês
     persist('plano'); render();
   });
   $('#prov-auto')?.addEventListener('click', () => { S.plano.proventosManual = null; persist('plano'); render(); });
@@ -419,7 +418,9 @@ function ligarComprar() {
       buscarCotacao(ticker, S.ajustes.token).then((q) => {
         novo.preco = q.preco; novo.precoEm = q.em; novo.fonte = q.fonte || 'brapi';
         if (!novo.nome && q.nome) novo.nome = q.nome;
-        persist('ativos'); pintarPrecos();
+        const mudou = corrigirTipo(novo, q.classe);
+        persist('ativos');
+        if (mudou) render(); else pintarPrecos();
       }).catch((err) => { statusCotacao[novo.id] = { erro: err.message }; pintarPrecos(); });
     }
   }
@@ -548,10 +549,12 @@ async function atualizarCotacoes() {
   atualizando = true;
   ultimaBusca = Date.now();
   pintarPrecos();
+  const corrigidos = [];
   const { ok, erros, total } = await atualizarTodas(S.ativos, S.ajustes.token, (a, q, err) => {
     if (q) {
       a.preco = q.preco; a.precoEm = q.em; a.fonte = q.fonte || 'brapi';
       if (!a.nome && q.nome) a.nome = q.nome;
+      if (corrigirTipo(a, q.classe)) corrigidos.push(a);
       delete statusCotacao[a.id];
     } else {
       statusCotacao[a.id] = { erro: err.message };
@@ -559,9 +562,26 @@ async function atualizarCotacoes() {
   });
   await atualizarTesouro();
   atualizando = false;
-  persist();
-  pintarPrecos();
+  persist(...(corrigidos.length ? ['ativos'] : []));
+  if (corrigidos.length) {
+    render();
+    toast(corrigidos.length === 1 ? `${corrigidos[0].ticker} agora aparece como ${TIPOS[corrigidos[0].tipo].nome}.` : `Tipo corrigido: ${corrigidos.map((a) => `${a.ticker} (${TIPOS[a.tipo].nome})`).join(', ')}.`);
+  } else pintarPrecos();
   if (total && !ok) toast('Não consegui atualizar os preços agora. Você pode digitá-los.');
+}
+
+/**
+ * Acerta o tipo de um ativo da bolsa (ação, FII, ETF, BDR) pelo que a cotação diz, e o das compras dele.
+ * Ex.: WRLD11 é ETF, não FII; TAEE11 é unit de ação. Devolve true se mudou.
+ */
+function corrigirTipo(a, classe) {
+  const BOLSA = ['acao', 'fii', 'etf', 'bdr'];
+  if (!classe || !BOLSA.includes(classe) || !BOLSA.includes(a.tipo) || a.tipo === classe) return false;
+  a.tipo = classe;
+  const compras = S.compras.filter((c) => c.ticker === a.ticker && BOLSA.includes(c.tipo) && c.tipo !== classe);
+  for (const c of compras) c.tipo = classe;
+  if (compras.length) N.adicionarCompras(compras); // a nuvem grava por cima das mesmas compras
+  return true;
 }
 
 /** Põe nos títulos do Tesouro da lista o preço de compra do último dia útil. Devolve quantos atualizou. */

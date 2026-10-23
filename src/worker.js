@@ -144,6 +144,19 @@ async function dadosTesouro(arquivo, ttl, env) {
   return new Response(r.body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${Math.min(ttl, 1800)}` } });
 }
 
+/**
+ * Tipo do ativo pelo código e pelo nome oficial (no Yahoo tudo vem como "EQUITY"):
+ * BDR pelo final do código; ETF quando o nome diz "classe/fundo de índice" ou "ETF"; FII quando diz imobiliário ou FII;
+ * o resto é ação, inclusive as units terminadas em 11 (TAEE11, KLBN11), que são de empresas. Sem nome, não diz.
+ */
+function classeDoAtivo(ticker, nome) {
+  if (/^[A-Z]{4}(32|33|34|35|39)$/.test(ticker)) return 'bdr';
+  if (!nome) return null;
+  if (/classe de [ií]ndice|fundo de [ií]ndice|\bETF\b/i.test(nome)) return 'etf';
+  if (/imobili|\bimob\b|\bFII\b|fiagro/i.test(nome)) return 'fii';
+  return 'acao';
+}
+
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 async function cotacaoYahoo(ticker) {
@@ -164,6 +177,7 @@ async function cotacaoYahoo(ticker) {
         em: m.regularMarketTime ? new Date(m.regularMarketTime * 1000).toISOString() : agora(),
         variacao: anterior ? (m.regularMarketPrice / anterior - 1) * 100 : null,
         nome: m.longName || m.shortName || null,
+        classe: classeDoAtivo(ticker.toUpperCase(), m.longName || m.shortName),
         fonte: 'yahoo',
       };
     } catch (e) {
@@ -186,6 +200,7 @@ async function cotacaoBrapi(ticker, token) {
     em: q.regularMarketTime || agora(),
     variacao: typeof q.regularMarketChangePercent === 'number' ? q.regularMarketChangePercent : null,
     nome: q.longName || q.shortName || null,
+    classe: classeDoAtivo(ticker.toUpperCase(), q.longName || q.shortName),
     fonte: 'brapi',
   };
 }
@@ -365,13 +380,12 @@ function juntarProventos(yahoo, tipados) {
 
 // busca de ativos da B3 pelo nome ou código, para escolher sem lembrar o ticker
 async function buscarAtivos(q) {
-  const classeYahoo = (t, nome) => (t === 'ETF' ? 'etf' : /imobili|fii\b|fundo de invest/i.test(nome || '') ? 'fii' : 'acao');
   try {
     const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=20&newsCount=0&lang=pt-BR&region=BR`;
     const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' }, cf: { cacheTtl: 86400, cacheEverything: true } });
     if (r.ok) {
       const xs = ((await r.json())?.quotes || []).filter((x) => /\.SA$/.test(x.symbol || ''))
-        .map((x) => { const nome = x.longname || x.shortname || ''; return { ticker: x.symbol.replace(/\.SA$/, ''), nome, classe: classeYahoo(x.quoteType, nome) }; })
+        .map((x) => { const nome = x.longname || x.shortname || ''; const ticker = x.symbol.replace(/\.SA$/, ''); return { ticker, nome, classe: x.quoteType === 'ETF' ? 'etf' : classeDoAtivo(ticker, nome) || 'acao' }; })
         .filter((x) => /^[A-Z0-9]{4,12}$/.test(x.ticker));
       if (xs.length) return xs;
     }
@@ -379,7 +393,7 @@ async function buscarAtivos(q) {
   try {
     const r = await fetch(`https://brapi.dev/api/quote/list?search=${encodeURIComponent(q)}&limit=20`, { cf: { cacheTtl: 86400, cacheEverything: true } });
     if (r.ok) {
-      return ((await r.json())?.stocks || []).map((x) => ({ ticker: x.stock, nome: x.name || '', classe: x.type === 'fund' ? 'fii' : x.type === 'bdr' ? 'bdr' : /11$/.test(x.stock) && /fii|imob/i.test(x.name || '') ? 'fii' : 'acao' }));
+      return ((await r.json())?.stocks || []).map((x) => ({ ticker: x.stock, nome: x.name || '', classe: x.type === 'bdr' ? 'bdr' : classeDoAtivo(x.stock, x.name) || (x.type === 'fund' ? 'fii' : 'acao') }));
     }
   } catch { /* sem resultado */ }
   return [];

@@ -1079,10 +1079,18 @@ html, body { overflow-x: clip; }
 .sim-aporte-in input { width: 130px; text-align: right; font-weight: 700; }
 .sim-itens-cab { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.35fr) 66px 32px; gap: 8px; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-3); }
 .sim-itens-cab span:nth-child(3) { white-space: nowrap; }
+/* no celular continua tudo numa linha só: tipo e ativo lado a lado, mais compactos */
 @media (max-width: 480px) {
   .sim-itens-cab { display: none; }
-  .sim-item { grid-template-columns: minmax(0, 1fr) 66px 32px; }
-  .sim-tipo { grid-column: 1 / -1; }
+  .sim-item { grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr) 54px 28px; gap: 5px; }
+  .sim-tipo .sel-btn { padding: 0 4px 0 8px; gap: 2px; font-size: 0.8rem; }
+  .sim-tipo .sel-btn svg { width: 14px; height: 14px; }
+  .sim-item .sim-ativo-btn { padding: 0 6px; gap: 6px; }
+  .sim-item .sim-ativo-btn .logo-ativo { width: 24px; height: 24px; border-radius: 7px; }
+  .sim-item .sa-txt b { font-size: 0.84rem; }
+  .sim-item .sim-peso { gap: 3px; }
+  .sim-item .sim-peso input, .sim-item .sim-taxa input { padding: 0 6px; }
+  .sim-item .sim-taxa small { display: none; }
 }
 .sim-itens-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
 .sim-opcoes { display: grid; gap: 14px; padding-top: 12px; border-top: 1px solid var(--linha); }

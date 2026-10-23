@@ -9,11 +9,12 @@ import { atualizarTodas, buscarCotacao } from './cotacoes.js';
 import * as N from './nuvem.js';
 import { simular, TIPOS_SIM, seriesNecessarias, resumoPorPeriodoSim, PRECOS_COMPRA, TIPOS_PROV_SIM, DIAS_APORTE, rotuloItem } from './simulador.js';
 import { CATALOGO, NOME_CLASSE_CAT, buscarNoCatalogo } from './catalogo.js';
+import { carregarTitulos, historicoTitulo, buscarTitulos, tituloPorNome, taxaTexto } from './tesouro.js';
 import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.12.0';
+export const VERSAO = '1.13.0';
 const VERSAO_DATA = '2026-10-23';
 
 let S = carregar();
@@ -60,6 +61,11 @@ function frescor(ativo) {
   const d = new Date(ativo.precoEm);
   const min = Math.round((Date.now() - d) / 60000);
   if (ativo.fonte === 'manual') return { txt: 'digitado', cls: '' };
+  if (ativo.fonte?.startsWith('tesouro')) {
+    // preço de compra do Tesouro do último dia útil; "estimado" quando vem da taxa de mercado da ANBIMA
+    const dias = (Date.now() - d) / 864e5;
+    return { txt: `${ativo.fonte === 'tesouro-est' ? 'estimado' : 'Tesouro'} ${dataBR(ativo.precoEm).slice(0, 5)}`, cls: dias > 5 ? 'velho' : '' };
+  }
   const manual = '';
   let txt;
   if (min < 1) txt = 'agora';
@@ -197,9 +203,14 @@ const ICONE_ALCA = '<svg viewBox="0 0 10 16" width="10" height="16" aria-hidden=
 let editandoLista = false;
 
 /** Logo do ativo (ícones públicos da brapi); se não houver, mostra as iniciais na cor do tipo. */
+const ICONE_TESOURO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10 12 4l9 6"/><path d="M5 10v8M9.7 10v8M14.3 10v8M19 10v8"/><path d="M3 21h18M4 18h16"/></svg>';
+/** Indexador de um título pelo nome ("Tesouro IPCA+ 2035" → ipca). */
+const indexadorDoNome = (n) => (/selic/i.test(n) ? 'selic' : /ipca|renda\+|educa\+/i.test(n) ? 'ipca' : 'pre');
+
 function htmlLogo(a) {
-  const ini = a.tipo === 'tesouro' ? 'TD' : a.ticker.replace(/[^A-Z]/gi, '').slice(0, 2).toUpperCase();
-  const img = a.tipo === 'tesouro' ? '' : `<img src="https://icons.brapi.dev/icons/${encodeURIComponent(a.ticker.toUpperCase())}.svg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onload="this.classList.add('ok')" onerror="this.remove()">`;
+  if (a.tipo === 'tesouro') return `<span class="logo-ativo tesouro ix-${a.indexador || indexadorDoNome(a.ticker)}" aria-hidden="true">${ICONE_TESOURO}</span>`;
+  const ini = a.ticker.replace(/[^A-Z]/gi, '').slice(0, 2).toUpperCase();
+  const img = `<img src="https://icons.brapi.dev/icons/${encodeURIComponent(a.ticker.toUpperCase())}.svg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onload="this.classList.add('ok')" onerror="this.remove()">`;
   return `<span class="logo-ativo ${a.tipo}" aria-hidden="true"><span>${esc(ini)}</span>${img}</span>`;
 }
 
@@ -374,9 +385,10 @@ function ligarComprar() {
   const form = $('#form-add'), addT = $('#add-ticker'), addTipo = $('#add-tipo');
   const abrirManual = () => { $('#add-abrir').hidden = true; form.hidden = false; addT.focus(); };
   $('#add-abrir').addEventListener('click', () => abrirEscolherAtivo((a) => {
+    if (a.titulo) { adicionarAtivo(a.nome, 'tesouro', a.nome); return; }
     const tipo = a.classe === 'fii' ? 'fii' : a.classe === 'etf' ? 'etf' : a.classe === 'bdr' ? 'bdr' : adivinharTipo(a.ticker) === 'fii' && a.classe !== 'acao' ? 'fii' : 'acao';
     adicionarAtivo(a.ticker, tipo, a.nome || '');
-  }, { manual: abrirManual, naLista: new Set(S.ativos.map((x) => x.ticker)) }));
+  }, { manual: abrirManual, titulos: true, naLista: new Set(S.ativos.map((x) => x.ticker)) }));
   $('#add-cancelar').addEventListener('click', () => { form.hidden = true; $('#add-abrir').hidden = false; form.reset(); delete addTipo.dataset.manual; });
   addT.addEventListener('input', () => { if (!addTipo.dataset.manual) addTipo.value = adivinharTipo(addT.value); });
   addTipo.addEventListener('change', () => { addTipo.dataset.manual = '1'; });
@@ -397,7 +409,12 @@ function ligarComprar() {
     if (fora.includes(ticker)) { S.ajustes.foraDaLista = fora.filter((t) => t !== ticker); persist('ativos', 'ajustes'); } else persist('ativos');
     render();
     $(`#q-${novo.id}`)?.scrollIntoView({ block: 'center' });
-    toast(tipo === 'tesouro' ? `${ticker} adicionado. Digite o preço do site do Tesouro.` : `${ticker} adicionado.`);
+    if (tipo === 'tesouro') {
+      atualizarTesouro([novo]).then((n) => {
+        persist('ativos'); pintarPrecos();
+        toast(n ? `${ticker} adicionado, com o preço do Tesouro.` : `${ticker} adicionado. Digite o preço do site do Tesouro.`);
+      });
+    } else toast(`${ticker} adicionado.`);
     if (tipo !== 'tesouro') {
       buscarCotacao(ticker, S.ajustes.token).then((q) => {
         novo.preco = q.preco; novo.precoEm = q.em; novo.fonte = q.fonte || 'brapi';
@@ -540,10 +557,31 @@ async function atualizarCotacoes() {
       statusCotacao[a.id] = { erro: err.message };
     }
   });
+  await atualizarTesouro();
   atualizando = false;
   persist();
   pintarPrecos();
   if (total && !ok) toast('Não consegui atualizar os preços agora. Você pode digitá-los.');
+}
+
+/** Põe nos títulos do Tesouro da lista o preço de compra do último dia útil. Devolve quantos atualizou. */
+async function atualizarTesouro(lista = S.ativos) {
+  const tes = lista.filter((a) => a.tipo === 'tesouro');
+  if (!tes.length || !N.nuvem.servidor) return 0;
+  let dados;
+  try { dados = await carregarTitulos(); } catch { return 0; }
+  let n = 0;
+  for (const a of tes) {
+    const t = tituloPorNome(dados.titulos, a.ticker);
+    if (!t?.hoje?.puCompra) continue;
+    const em = `${t.hoje.data}T18:00:00-03:00`;
+    if (a.fonte === 'manual' && a.precoEm && new Date(a.precoEm) > new Date(em)) continue; // digitado depois: vale o seu
+    Object.assign(a, { preco: t.hoje.puCompra, precoEm: em, fonte: t.hoje.estimado ? 'tesouro-est' : 'tesouro', titulo: t.id });
+    if (!a.nome || a.nome === a.ticker) a.nome = t.nome;
+    delete statusCotacao[a.id];
+    n++;
+  }
+  return n;
 }
 
 // ---------- registrar compras ----------
@@ -646,6 +684,7 @@ function abrirDividir() {
       <p class="dica">Marque os ativos que entram nesta compra e diga quanto vai para cada um. O app calcula quantas cotas cabem em cada parte, já com as taxas do ${esc(b.nome)}.</p>
       <label class="campo dv-valor"><span>Valor para dividir</span><input id="dv-valor" class="num" inputmode="decimal" value="${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}"><span class="sub">aporte + proventos: ${R(disponivel())}</span></label>
       <div class="dv-atalhos"><button type="button" class="btn peq" id="dv-igual">Partes iguais</button><button type="button" class="btn peq" id="dv-zerar">${ICONE_LIMPAR}Zerar %</button></div>
+      <label class="dv-todos"><span class="dv-check"><input type="checkbox" id="dv-todos" aria-label="Marcar ou desmarcar todos"></span><span>Todos</span><small id="dv-todos-n"></small></label>
       <div class="dv-lista">${ativos.map((a) => `<div class="dv-item" data-tk="${esc(a.ticker)}">
         <label class="dv-check" title="Incluir ${esc(a.ticker)} na compra"><input type="checkbox" data-dv-incluir="${a.id}" aria-label="Incluir ${esc(a.ticker)} na compra" ${selecionados.has(a.id) ? 'checked' : ''} ${a.preco > 0 ? '' : 'disabled'}></label>
         ${htmlLogo(a)}
@@ -673,13 +712,29 @@ function abrirDividir() {
     if (e.target.dataset.pc) pcts[e.target.dataset.pc] = Math.max(0, num(e.target.value) || 0);
     pintar();
   };
+  const marcaveis = ativos.filter((a) => a.preco > 0);
   dlg.onchange = (e) => {
+    if (e.target.id === 'dv-todos') {
+      // marca todos os que têm preço, ou desmarca todos
+      for (const a of marcaveis) e.target.checked ? selecionados.add(a.id) : selecionados.delete(a.id);
+      dlg.querySelectorAll('[data-dv-incluir]').forEach((c) => { if (!c.disabled) c.checked = e.target.checked; });
+      repor(); return;
+    }
     const id = e.target.dataset.dvIncluir;
     if (!id) return;
     e.target.checked ? selecionados.add(id) : selecionados.delete(id);
     repor();
   };
+  const pintarTodos = () => {
+    const n = marcaveis.filter((a) => selecionados.has(a.id)).length;
+    const todos = $('#dv-todos', dlg);
+    todos.checked = n > 0 && n === marcaveis.length;
+    todos.indeterminate = n > 0 && n < marcaveis.length;
+    todos.disabled = !marcaveis.length;
+    $('#dv-todos-n', dlg).textContent = `${n} de ${marcaveis.length} marcados`;
+  };
   const repor = () => {
+    pintarTodos();
     dlg.querySelectorAll('[data-pc]').forEach((i) => {
       const a = ativos.find((x) => x.ticker === i.dataset.pc);
       i.value = fmtPc(pcts[i.dataset.pc]);
@@ -702,6 +757,7 @@ function abrirDividir() {
     persist('ajustes', 'plano'); render();
     toast(d.resta > 0.005 ? `Compra montada. Sobram ${R(valor - d.linhas.reduce((s2, l) => s2 + l.total, 0))}.` : 'Compra montada pelas suas %.');
   };
+  pintarTodos();
   pintar();
   dlg.showModal();
 }
@@ -1885,7 +1941,7 @@ const simPadrao = () => ({
   comparar: true,
   carteiras: [
     novaCarteiraSim('Carteira A', [{ tipo: 'bolsa', ticker: 'BBAS3', nome: 'Banco do Brasil ON', classe: 'acao', peso: 50 }, { tipo: 'bolsa', ticker: 'PETR4', nome: 'Petrobras PN', classe: 'acao', peso: 50 }]),
-    novaCarteiraSim('Carteira B', [{ tipo: 'selic', peso: 100 }]),
+    novaCarteiraSim('Carteira B', [{ tipo: 'titulo', titulo: 'LFT-2029-03-01', nome: 'Tesouro Selic 2029', peso: 100 }]),
   ],
 });
 let SIM = (() => {
@@ -1952,9 +2008,11 @@ function composicaoCart(c) {
 /** Etiqueta da carteira: a letra na cor dela + o nome. curto = o nome corta com reticências. */
 const tagCart = (i, nome, curto = false) => `<span class="sim-tag sim-tag-${CORES_SIM[i]} ${curto ? 'curto' : ''}" title="${esc(nome)}"><i>${LETRAS_SIM[i]}</i><span>${esc(nome)}</span></span>`;
 const pesoSoma = (c) => c.itens.reduce((s, it) => s + (Number(it.peso) || 0), 0);
-const itemEscolhidoSim = (it) => it.tipo !== 'bolsa' || Boolean(it.ticker);
+const itemEscolhidoSim = (it) => (it.tipo === 'bolsa' ? Boolean(it.ticker) : it.tipo === 'titulo' ? Boolean(it.titulo) : true);
 const fmtPct0 = (v) => `${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
 const temBolsaSim = (c) => c.itens.some((it) => it.tipo === 'bolsa');
+/** Títulos com juros semestrais (IPCA+ e Prefixado com juros) também pagam: aí as opções de proventos valem para eles. */
+const pagaJurosSim = (c) => c.itens.some((it) => it.tipo === 'titulo' && /^(NTNB|NTNF)-/.test(it.titulo || ''));
 /** Nas tabelas que viram cartões no celular, o conteúdo de cada célula fica junto, à direita do rótulo. */
 const resp = (html) => html.replace(/(<td [^>]*data-rot="[^"]*"[^>]*>)([\s\S]*?)(<\/td>)/g, '$1<span class="rv">$2</span>$3');
 const sinalR = (v) => `${v >= 0 ? '+' : '−'} ${R(Math.abs(v))}`;
@@ -1962,16 +2020,21 @@ const clsV = (v) => (v >= 0 ? 'var-alta' : 'var-baixa');
 
 function htmlItemSim(it, ci, ii) {
   const t = TIPOS_SIM[it.tipo] || TIPOS_SIM.bolsa;
-  const meio = it.tipo === 'bolsa'
-    ? `<button type="button" class="sim-ativo-btn ${it.ticker ? '' : 'vazio'}" data-escolher aria-label="${it.ticker ? `Trocar ${esc(it.ticker)}` : 'Escolher ativo'}">
-        ${it.ticker ? `${htmlLogo({ ticker: it.ticker, tipo: it.classe || 'acao' })}<span class="sa-txt"><b>${esc(it.ticker)}</b><small>${esc(it.nome || nomeDoAtivo(it.ticker) || '')}</small></span>` : '<span class="sa-txt"><b>Escolher ativo</b><small>buscar por nome ou código</small></span>'}
-      </button>`
-    : t.taxa
-      ? `<span class="sim-taxa"><input class="num" data-campo="taxa" inputmode="decimal" value="${esc(String(it.taxa ?? t.taxa.padrao).replace('.', ','))}" aria-label="${esc(t.taxa.rotulo)}"><small>${esc(t.taxa.sufixo)}</small></span>`
-      : '<span class="sim-taxa"><small>rende a Selic do dia</small></span>';
-  return `<div class="sim-item" data-c="${ci}" data-i="${ii}">
-    <span class="sim-tipo"><select data-campo="tipo" aria-label="Tipo">${Object.entries(TIPOS_SIM).map(([k, v]) => `<option value="${k}" ${k === it.tipo ? 'selected' : ''}>${esc(v.nome)}</option>`).join('')}</select></span>
-    ${meio}
+  const rf = it.tipo !== 'bolsa' && it.tipo !== 'titulo';
+  const conteudo = it.tipo === 'titulo'
+    ? (it.titulo ? `${htmlLogo({ ticker: it.nome, tipo: 'tesouro' })}<span class="sa-txt"><b title="${esc(it.nome)}">${esc(String(it.nome || '').replace(/^Tesouro /, ''))}</b><small>Tesouro Direto · vence ${dataBR(it.titulo.slice(-10))}</small></span>`
+      : '<span class="sa-txt"><b>Escolher título</b><small>Selic, Prefixado, IPCA+…</small></span>')
+    : it.tipo === 'bolsa'
+      ? (it.ticker ? `${htmlLogo({ ticker: it.ticker, tipo: it.classe || 'acao' })}<span class="sa-txt"><b>${esc(it.ticker)}</b><small>${esc(it.nome || nomeDoAtivo(it.ticker) || '')}</small></span>`
+        : '<span class="sa-txt"><b>Escolher investimento</b><small>ação, FII, Tesouro, CDB…</small></span>')
+      : `<span class="logo-ativo rf" aria-hidden="true"><span>RF</span></span><span class="sa-txt"><b>${esc(t.curto)}</b><small>${esc(t.antigo ? 'calculado pela taxa' : it.tipo === 'lci' ? '% do CDI, isenta de IR' : '% do CDI')}</small></span>`;
+  const vazio = (it.tipo === 'bolsa' && !it.ticker) || (it.tipo === 'titulo' && !it.titulo);
+  const taxa = !rf ? '' : t.taxa
+    ? `<span class="sim-taxa"><input class="num" data-campo="taxa" inputmode="decimal" value="${esc(String(it.taxa ?? t.taxa.padrao).replace('.', ','))}" aria-label="${esc(t.taxa.rotulo)}"><small>${esc(t.taxa.sufixo)}</small></span>`
+    : '<span class="sim-taxa"><small>rende a Selic do dia</small></span>';
+  return `<div class="sim-item ${rf ? 'com-taxa' : ''}" data-c="${ci}" data-i="${ii}">
+    <button type="button" class="sim-ativo-btn ${vazio ? 'vazio' : ''}" data-escolher aria-label="${vazio ? 'Escolher investimento' : `Trocar ${esc(it.tipo === 'bolsa' ? it.ticker : it.tipo === 'titulo' ? it.nome : t.curto)}`}">${conteudo}</button>
+    ${taxa}
     <span class="sim-peso"><input class="num" data-campo="peso" inputmode="decimal" value="${esc(String(it.peso ?? '').replace('.', ','))}" aria-label="Percentual do aporte"><small>%</small></span>
     <button type="button" class="ic-btn perigo sim-tirar" data-tirar title="Tirar da carteira" aria-label="Tirar da carteira">${ICONE_LIXO}</button>
   </div>`;
@@ -1980,6 +2043,7 @@ function htmlItemSim(it, ci, ii) {
 function htmlCarteiraSim(c, ci) {
   const soma = pesoSoma(c);
   const bolsa = temBolsaSim(c);
+  const juros = pagaJurosSim(c);
   const qtdEscolhidos = c.itens.filter(itemEscolhidoSim).length;
   return `<section class="bloco sim-carteira sim-${CORES_SIM[ci]}" data-carteira="${ci}">
     <div class="bloco-cab"><h2 class="sim-cart-tit" data-titulo="${ci}">${tagCart(ci, nomeCart(c, ci))}<button type="button" class="ic-btn" data-renomear="${ci}" title="Dar um nome" aria-label="Dar um nome à carteira ${LETRAS_SIM[ci]}">${ICONE_EDITAR}</button></h2>
@@ -1995,21 +2059,21 @@ function htmlCarteiraSim(c, ci) {
       })()}
     </div>
     <div class="sim-itens">
-      <div class="sim-itens-cab" aria-hidden="true"><span>Onde investir</span><span></span><span>% do aporte</span><span></span></div>
+      <div class="sim-itens-cab" aria-hidden="true"><span>Onde investir</span><span>% do aporte</span><span></span></div>
       ${c.itens.map((it, ii) => htmlItemSim(it, ci, ii)).join('')}
     </div>
     <div class="sim-itens-acoes">${qtdEscolhidos >= 2 ? `<button type="button" class="btn peq" data-dividir-igual="${ci}">Dividir igualmente</button>` : ''}<button type="button" class="btn peq" data-add="${ci}">+ Investimento</button></div>
-    ${bolsa ? `<div class="sim-opcoes">
+    ${bolsa || juros ? `<div class="sim-opcoes">
       <div class="sim-op">
-        <span class="sim-op-tit">Proventos (dividendos, JCP, rendimentos)</span>
+        <span class="sim-op-tit">${bolsa ? `Proventos (dividendos, JCP, rendimentos${juros ? ', juros do Tesouro' : ''})` : 'Juros semestrais do Tesouro'}</span>
         <div class="sim-escolhas">${Object.entries(MODOS_PROV).map(([k, [n, d]]) => `<button type="button" class="sim-escolha" data-modo-prov="${k}" data-c="${ci}" aria-pressed="${c.proventos === k}"><b>${n}</b><small>${d}</small></button>`).join('')}</div>
       </div>
-      <div class="sim-op">
+      ${bolsa ? `<div class="sim-op">
         <span class="sim-op-tit">Preço da compra na bolsa</span>
         <div class="seg sim-seg" role="group" aria-label="Preço de compra">${Object.entries(PRECOS_COMPRA).map(([k, [n]]) => `<button type="button" data-preco="${k}" data-c="${ci}" aria-pressed="${c.preco === k}">${n}</button>`).join('')}</div>
         <small class="dica">${PRECOS_COMPRA[c.preco][1]}</small>
-      </div>
-    </div>` : '<p class="dica sim-so-rf">Só renda fixa: rende todo dia útil e não paga proventos, então não há opções de proventos nem de preço de compra.</p>'}
+      </div>` : ''}
+    </div>` : '<p class="dica sim-so-rf">Só renda fixa sem juros semestrais: não paga proventos, então não há opções de proventos nem de preço de compra.</p>'}
   </section>`;
 }
 
@@ -2028,16 +2092,33 @@ function meusAtivosSim() {
 const nomeDoAtivo = (t) => CATALOGO.find((x) => x.ticker === t)?.nome || S.ativos.find((x) => x.ticker === t)?.nome || '';
 const CHIP_CLASSE = { acao: ['acao', 'Ação'], fii: ['fii', 'FII'], etf: ['etf', 'ETF'], bdr: ['bdr', 'BDR'] };
 
-/** Lista de ativos com busca. opts: { manual: () => void } mostra a opção de digitar à mão (Tesouro, CDB…); { naLista: Set } marca o que já está na lista. */
+/**
+ * Lista de ativos com busca. opts: { manual: () => void } mostra a opção de digitar à mão (CDB, LCI…);
+ * { naLista: Set } marca o que já está na lista; { titulos: true } inclui os títulos do Tesouro Direto
+ * ({ tesouroPrimeiro: true } mostra eles antes das ações); { rendaFixa: true } inclui CDB e LCI/LCA (simulador).
+ */
 function abrirEscolherAtivo(aoEscolher, opts = {}) {
   const dlg = $('#dlg-ativo');
   const meus = meusAtivosSim();
+  let titulos = null; // null = carregando; [] = não deu
+  if (opts.titulos && N.nuvem.servidor) carregarTitulos().then((d) => { titulos = d.titulos; }).catch(() => { titulos = []; }).finally(() => { if (dlg.open) pintar(); });
+  else titulos = [];
+  const itemTitulo = (t) => `<button type="button" class="pk-item" role="option" data-pick="${esc(t.nome)}" data-titulo="${esc(t.id)}" data-nome="${esc(t.nome)}" data-classe="tesouro">
+      ${htmlLogo({ ticker: t.nome, tipo: 'tesouro', indexador: t.indexador })}<span class="pk-txt"><b>${esc(t.nome)}</b><small>${t.aVenda && t.hoje?.puCompra ? `${esc(taxaTexto(t))} · ${R(t.hoje.puCompra)}${opts.rendaFixa ? ` · preços desde ${dataBR(t.desde).slice(3)}` : ''}` : `${t.venc <= hojeISO() ? 'venceu' : 'vence'} em ${dataBR(t.venc)} · preços desde ${dataBR(t.desde).slice(3)}`}</small></span>${opts.naLista?.has(t.nome) ? '<span class="pk-ja">na lista</span>' : ''}<span class="chip tesouro">Tesouro</span></button>`;
+  const grupoTitulos = (nome, ts) => (ts.length ? `<div class="pk-grupo"><small class="pk-tit">${esc(nome)}</small>${ts.map(itemTitulo).join('')}</div>` : '');
+  const RF = [['cdb', 'CDB', 'rende um % do CDI · paga IR'], ['lci', 'LCI ou LCA', 'rende um % do CDI · isenta de IR']];
+  const grupoRF = (q = '') => {
+    if (!opts.rendaFixa) return '';
+    const xs = RF.filter(([, n, d]) => !q || `${n} ${d} renda fixa cdi`.toLowerCase().includes(q.toLowerCase()));
+    return xs.length ? `<div class="pk-grupo"><small class="pk-tit">Renda fixa de banco</small>${xs.map(([k, n, d]) => `<button type="button" class="pk-item" role="option" data-pick="${n}" data-rf="${k}"><span class="logo-ativo rf" aria-hidden="true"><span>RF</span></span><span class="pk-txt"><b>${n}</b><small>${d}</small></span><span class="chip rf">Renda fixa</span></button>`).join('')}</div>` : '';
+  };
+  const carregandoTitulos = () => (opts.titulos && titulos === null ? '<div class="pk-grupo"><small class="pk-tit">Tesouro Direto</small><p class="dica pk-buscando">Carregando os títulos do Tesouro…</p></div>' : '');
   dlg.innerHTML = `
     <form method="dialog" class="form-edit pk-form">
       <div class="pk-cab"><h2>Escolher ativo</h2><button class="ic-btn fechar" value="cancelar" aria-label="Fechar">${ICONE_LIMPAR}</button></div>
-      <input type="search" id="pk-q" placeholder="Nome ou código — ex.: banco do brasil, PETR4, kinea" autocomplete="off" spellcheck="false" enterkeyhint="search">
+      <input type="search" id="pk-q" placeholder="${opts.titulos ? 'Nome ou código — ex.: PETR4, kinea, IPCA+ 2035' : 'Nome ou código — ex.: banco do brasil, PETR4, kinea'}" autocomplete="off" spellcheck="false" enterkeyhint="search">
       <div class="pk-lista" id="pk-lista" role="listbox" aria-label="Ativos"></div>
-      ${opts.manual ? '<button type="button" class="btn peq pk-manual" id="pk-manual">Tesouro, CDB ou outro? Digitar à mão</button>' : ''}
+      ${opts.manual ? '<button type="button" class="btn peq pk-manual" id="pk-manual">CDB, LCI ou outro? Digitar à mão</button>' : ''}
     </form>`;
   $('#pk-manual', dlg)?.addEventListener('click', () => { dlg.close('cancelar'); opts.manual(); });
   const lista = $('#pk-lista', dlg);
@@ -2052,17 +2133,24 @@ function abrirEscolherAtivo(aoEscolher, opts = {}) {
   const pintar = () => {
     const q = $('#pk-q', dlg).value.trim();
     if (!q) {
-      lista.innerHTML = grupo('Da sua carteira', meus) + Object.entries(NOME_CLASSE_CAT).map(([k, n]) => grupo(`${n} conhecidos`, CATALOGO.filter((a) => a.classe === k && !meus.some((m) => m.ticker === a.ticker)))).join('');
+      const tes = grupoTitulos('Tesouro Direto à venda', (titulos || []).filter((t) => t.aVenda)) + carregandoTitulos();
+      const bolsa = grupo('Da sua carteira', meus) + Object.entries(NOME_CLASSE_CAT).map(([k, n]) => grupo(`${n} conhecidos`, CATALOGO.filter((a) => a.classe === k && !meus.some((m) => m.ticker === a.ticker)))).join('');
+      lista.innerHTML = (opts.tesouroPrimeiro ? tes + bolsa : grupo('Da sua carteira', meus) + tes + Object.entries(NOME_CLASSE_CAT).map(([k, n]) => grupo(`${n} conhecidos`, CATALOGO.filter((a) => a.classe === k && !meus.some((m) => m.ticker === a.ticker)))).join('')) + grupoRF();
       return;
     }
+    const achados = titulos ? buscarTitulos(titulos, q) : [];
+    const tesHtml = grupoTitulos('Tesouro Direto', achados.filter((t) => t.aVenda)) + grupoTitulos('Títulos que já venceram ou saíram de venda', achados.filter((t) => !t.aVenda).slice(0, 30)) + carregandoTitulos();
     const locais = buscarNoCatalogo([...meus, ...CATALOGO.filter((a) => !meus.some((m) => m.ticker === a.ticker))], q);
     const extra = remotos.filter((r) => !locais.some((l) => l.ticker === r.ticker));
     const cod = q.toUpperCase().replace(/\s/g, '');
     const usarCodigo = /^[A-Z]{4}\d{1,2}[A-Z]?$/.test(cod) && ![...locais, ...extra].some((a) => a.ticker === cod)
       ? `<button type="button" class="pk-item pk-codigo" data-pick="${esc(cod)}" data-nome="" data-classe="${/11$/.test(cod) ? 'fii' : 'acao'}"><span class="pk-txt"><b>Usar ${esc(cod)}</b><small>o código que você digitou</small></span></button>` : '';
-    lista.innerHTML = (locais.length || extra.length || usarCodigo)
-      ? grupo('Encontrados', locais) + grupo('Mais resultados na B3', extra) + usarCodigo + (N.nuvem.servidor && q.length >= 2 && ultimaQ !== q ? '<p class="dica pk-buscando">Procurando mais na B3…</p>' : '')
-      : (N.nuvem.servidor && ultimaQ !== q ? '<p class="dica pk-buscando">Procurando na B3…</p>' : '<p class="dica">Nada encontrado. Tente outro nome ou o código (ex.: TAEE11).</p>');
+    const ehTesouro = /tesouro|selic|ipca|prefixad|renda\+|educa\+/i.test(q);
+    const bolsaHtml = grupo('Encontrados', locais) + grupo('Mais resultados na B3', extra) + usarCodigo;
+    const rfHtml = grupoRF(q);
+    lista.innerHTML = (locais.length || extra.length || usarCodigo || achados.length || rfHtml)
+      ? (ehTesouro ? tesHtml + bolsaHtml : rfHtml && !locais.length ? rfHtml + bolsaHtml + tesHtml : bolsaHtml + tesHtml + rfHtml) + (N.nuvem.servidor && q.length >= 2 && ultimaQ !== q && !ehTesouro ? '<p class="dica pk-buscando">Procurando mais na B3…</p>' : '')
+      : carregandoTitulos() || (N.nuvem.servidor && ultimaQ !== q ? '<p class="dica pk-buscando">Procurando na B3…</p>' : `<p class="dica">Nada encontrado. Tente outro nome ou o código (ex.: TAEE11${opts.titulos ? ', Tesouro IPCA+ 2035' : ''}).</p>`);
   };
   const buscar = () => {
     const q = $('#pk-q', dlg).value.trim();
@@ -2084,7 +2172,7 @@ function abrirEscolherAtivo(aoEscolher, opts = {}) {
   lista.addEventListener('click', (e) => {
     const b = e.target.closest('[data-pick]');
     if (!b) return;
-    aoEscolher({ ticker: b.dataset.pick, nome: b.dataset.nome || nomeDoAtivo(b.dataset.pick), classe: b.dataset.classe });
+    aoEscolher({ ticker: b.dataset.pick, nome: b.dataset.nome || nomeDoAtivo(b.dataset.pick), classe: b.dataset.classe, titulo: b.dataset.titulo || null, rf: b.dataset.rf || null });
     dlg.close('ok');
   });
   pintar();
@@ -2096,8 +2184,8 @@ function abrirEscolherAtivo(aoEscolher, opts = {}) {
 
 // ---------- resultado ----------
 const ROTULO_PRECO = { fechamento: 'fechamento', abertura: 'abertura', medio: 'preço médio do dia' };
-const NOMES_PROV_RES = { dividendo: 'Dividendos', jcp: 'JCP (juros sobre capital próprio)', rendimento: 'Rendimentos de FII', outro: 'Outros proventos', provento: 'Proventos sem tipo informado' };
-const ORDEM_PROV_SIM = ['dividendo', 'jcp', 'rendimento', 'outro', 'provento'];
+const NOMES_PROV_RES = { dividendo: 'Dividendos', jcp: 'JCP (juros sobre capital próprio)', rendimento: 'Rendimentos de FII', juros: 'Juros do Tesouro (cupons)', outro: 'Outros proventos', provento: 'Proventos sem tipo informado' };
+const ORDEM_PROV_SIM = ['dividendo', 'jcp', 'rendimento', 'juros', 'outro', 'provento'];
 const swProv = (t) => `<i class="sw pv-${t === 'provento' ? 'outro' : esc(t)}"></i>`;
 const NOME_CLASSE_SIM = { acao: 'Ações', fii: 'FIIs', outros: 'ETF/BDR', tesouro: 'Tesouro', rf: 'CDB e LCI' };
 
@@ -2125,6 +2213,23 @@ function htmlHeroiSim(r, c, i) {
   </div>`;
 }
 
+/** Avisos dos títulos do Tesouro na simulação: preço estimado no fim, vencimento e início do histórico. */
+function notasTitulosSim() {
+  const { res, tesouroAte } = SIM_RES;
+  const ls = res.flatMap((r) => r.linhas.filter((l) => l.tipo === 'titulo').map((l) => ({ ...l, de: r.de })));
+  if (!ls.length) return '';
+  const vistos = new Set();
+  const notas = [];
+  for (const l of ls) {
+    if (vistos.has(l.rotulo)) continue;
+    vistos.add(l.rotulo);
+    if (l.venceu) notas.push(`<b>${esc(l.rotulo)}</b> venceu em ${dataBR(l.venc)}: depois disso o valor ficou parado e a parte dele nos aportes ficou em caixa.`);
+    if (l.desde > l.de) notas.push(`<b>${esc(l.rotulo)}</b> só tem preço desde ${dataBR(l.desde)}; antes disso a parte dele ficou em caixa.`);
+  }
+  if (ls.some((l) => l.estimado)) notas.push(`Os preços do Tesouro${tesouroAte ? ` depois de ${dataBR(tesouroAte)}` : ' mais recentes'} são estimados pela taxa de mercado da ANBIMA: o Tesouro publica o histórico oficial de tempos em tempos.`);
+  return notas.length ? `<div class="sim-notas-tes">${notas.map((n) => `<p class="dica">${n}</p>`).join('')}</div>` : '';
+}
+
 function htmlResultadoSim() {
   if (!SIM_RES) return '';
   const { res, cfg } = SIM_RES;
@@ -2146,6 +2251,7 @@ function htmlResultadoSim() {
       <div class="bloco-cab"><h2>Resultado</h2><small>${res.map((r, i) => `${res.length > 1 ? `${LETRAS_SIM[i]}: ` : ''}${r.nAportes} aportes`).join(' · ')} · ${dataBR(r0.de)} a ${dataBR(r0.fim)}</small></div>
       ${veredito()}
       <div class="sim-herois">${res.map((r, i) => htmlHeroiSim(r, cfg.carteiras[i], i)).join('')}</div>
+      ${notasTitulosSim()}
       <details class="sim-det" ${matchMedia('(min-width: 721px)').matches ? 'open' : ''}>
         <summary>Todos os números</summary>
         <div class="sim-comp" style="--cols:${res.length}">
@@ -2157,7 +2263,7 @@ function htmlResultadoSim() {
           ${temBolsa ? linha('Valorização das cotas <small>preço de hoje − preço pago, com as taxas</small>', (r) => (r.linhas.some((l) => l.tipo === 'bolsa') ? `<span class="num ${clsV(r.valorizacaoBolsa)}">${sinalR(r.valorizacaoBolsa)} <small>${pct(r.bolso ? r.valorizacaoBolsa / r.bolso : null)}</small></span>` : '<span class="num">—</span>'), 'sim-parte') : ''}
           ${temRF ? linha('Rendimento da renda fixa <small>juros do Tesouro, CDB ou LCI</small>', (r) => (r.linhas.some((l) => l.tipo !== 'bolsa') ? `<span class="num ${clsV(r.rendimentoRF)}">${sinalR(r.rendimentoRF)} <small>${pct(r.bolso ? r.rendimentoRF / r.bolso : null)}</small></span>` : '<span class="num">—</span>'), 'sim-parte') : ''}
           ${temBolsa ? linha('Proventos recebidos <small>já líquidos, caídos na conta</small>', (r) => `<span class="num ${r.proventos ? 'var-alta' : ''}">${r.proventos ? `+ ${R(r.proventos)} <small>${pct(r.bolso ? r.proventos / r.bolso : null)}</small>` : '—'}</span>`, 'sim-parte') : ''}
-          ${tiposProv.map((t) => linha(`${swProv(t)}${esc(NOMES_PROV_RES[t])}${t === 'jcp' ? ' <small>líquido, sem os 15% de IR</small>' : t === 'dividendo' || t === 'rendimento' ? ' <small>isentos de IR</small>' : ''}`, (r) => `<span class="num">${r.provTipos[t] ? R(r.provTipos[t]) : '—'}${t === 'jcp' && r.irJcp > 0.005 ? `<small>IR retido ${R(r.irJcp)}</small>` : ''}</span>`, 'sim-sub-tipo')).join('')}
+          ${tiposProv.map((t) => linha(`${swProv(t)}${esc(NOMES_PROV_RES[t])}${t === 'jcp' ? ' <small>líquido, sem os 15% de IR</small>' : t === 'juros' ? ' <small>líquidos, já sem o IR</small>' : t === 'dividendo' || t === 'rendimento' ? ' <small>isentos de IR</small>' : ''}`, (r) => `<span class="num">${r.provTipos[t] ? R(r.provTipos[t]) : '—'}${t === 'jcp' && r.irJcp > 0.005 ? `<small>IR retido ${R(r.irJcp)}</small>` : t === 'juros' && r.irJuros > 0.005 ? `<small>IR retido ${R(r.irJuros)}</small>` : ''}</span>`, 'sim-sub-tipo')).join('')}
           ${linha('Ganho total <small>valor hoje − o que saiu do bolso</small>', (r) => `<span class="num ${clsV(r.ganho)}">${sinalR(r.ganho)} <small>${pct(r.ganhoPct)}</small></span>`, 'sim-total')}
           ${res.some((r) => r.aReceberTotal > 0.005) ? linha('A receber <small>data-com já passou, pago depois de hoje</small>', (r) => `<span class="num">${r.aReceberTotal > 0.005 ? R(r.aReceberTotal) : '—'}</span>`) : ''}
           ${temIR ? linha('Se resgatasse hoje <small>− IR da renda fixa</small>', (r) => `<span class="num">${R(r.liquido)}</span>`) : ''}
@@ -2477,6 +2583,15 @@ function htmlCardSim(o, modoPreco) {
         <div class="cc-linha cc-rodape"><small>${dataBR(o.data)} · ${ROTULO_PRECO[modoPreco]} · dia entre ${R(o.minima)} e ${R(o.maxima)}${o.diaPregao !== o.data ? ` · pregão de ${dataBR(o.diaPregao)}` : ''}</small></div>
       </div></div>`;
   }
+  if (o.tipo === 'aplicacao' && o.rf === 'titulo') {
+    return `<div class="card-compra">
+      ${htmlLogo({ ticker: o.rotulo, tipo: 'tesouro', indexador: o.indexador })}
+      <div class="cc-info">
+        <div class="cc-linha"><b class="cc-ticker">${esc(o.rotulo)} <span class="cc-op">compra</span></b><span class="cc-total num">${R(o.valor)}</span></div>
+        <div class="cc-linha cc-sub"><span>${fmtQtd(o.qtd)} ${o.qtd === 1 ? 'título' : 'títulos'} × ${R(o.preco)}</span>${o.taxa != null ? `<span class="cc-taxa">${esc(taxaTexto({ indexador: o.indexador }, o.taxa))}</span>` : ''}</div>
+        <div class="cc-linha cc-rodape"><small>${dataBR(o.data)} · preço de compra do Tesouro${o.diaPreco !== o.data ? ` de ${dataBR(o.diaPreco)}` : ''}${o.estimado ? ' · estimado' : ''} · sem taxa na compra</small></div>
+      </div></div>`;
+  }
   if (o.tipo === 'aplicacao') {
     return `<div class="card-compra">
       <span class="logo-ativo tesouro" aria-hidden="true"><span>${o.rf === 'cdb' || o.rf === 'lci' ? 'RF' : 'TD'}</span></span>
@@ -2487,6 +2602,16 @@ function htmlCardSim(o, modoPreco) {
   }
   // provento
   const nomeTipo = o.ptipo === 'provento' ? 'Provento (tipo não informado)' : TIPOS_PROV_SIM[o.ptipo] || o.ptipo;
+  if (o.ptipo === 'juros') {
+    return `<div class="card-compra card-prov">
+    ${htmlLogo({ ticker: o.ticker, tipo: 'tesouro' })}
+    <div class="cc-info">
+      <div class="cc-linha"><b class="cc-ticker">${esc(o.ticker)}</b><span class="cc-total num var-alta">+ ${R(o.valor)}</span></div>
+      <div class="cc-linha cc-sub"><span class="pv-rotulo">${swProv('juros')}Juros semestrais</span></div>
+      <div class="cc-linha cc-sub sim-prov-conta"><span>${fmtQtd(o.cotas)} ${o.cotas === 1 ? 'título' : 'títulos'} × ${R(o.porCota)} = ${R(o.bruto)}${o.ir > 0.005 ? ` − IR ${R(o.ir)}` : ''}</span></div>
+      <div class="cc-linha cc-rodape"><small>pago em ${dataBR(o.data)}</small></div>
+    </div></div>`;
+  }
   return `<div class="card-compra card-prov">
     ${htmlLogo({ ticker: o.ticker, tipo: o.ptipo === 'rendimento' ? 'fii' : 'acao' })}
     <div class="cc-info">
@@ -2602,6 +2727,8 @@ async function rodarSimulacao({ rolar = true } = {}) {
       if (it.tipo === 'bolsa') {
         it.ticker = String(it.ticker || '').trim().toUpperCase();
         if (!/^[A-Z0-9]{4,12}$/.test(it.ticker)) { toast(`${c.nome}: escolha o ativo de cada linha.`); return; }
+      } else if (it.tipo === 'titulo') {
+        if (!it.titulo) { toast(`${c.nome}: escolha o título do Tesouro de cada linha.`); return; }
       } else if (TIPOS_SIM[it.tipo].taxa) {
         it.taxa = Number(it.taxa ?? TIPOS_SIM[it.tipo].taxa.padrao);
         if (!Number.isFinite(it.taxa)) { toast(`${c.nome}: confira a taxa.`); return; }
@@ -2619,12 +2746,15 @@ async function rodarSimulacao({ rolar = true } = {}) {
     const todos = cfg.carteiras.flatMap((c) => c.itens);
     const tickers = [...new Set(todos.filter((it) => it.tipo === 'bolsa').map((it) => it.ticker))];
     const series = seriesNecessarias(todos);
-    const [precos, indices] = await Promise.all([
+    const ids = [...new Set(todos.filter((it) => it.tipo === 'titulo').map((it) => it.titulo))];
+    const [precos, indices, titulos, listaTes] = await Promise.all([
       Promise.all(tickers.map((t) => apiSim(`sim/precos?t=${t}&de=${de}`).catch((e) => { throw new Error(`${t}: ${e.message}`); }))),
       Promise.all(series.map((s) => apiSim(`sim/indice?s=${s}&de=${de}`).catch((e) => { throw new Error(`taxa ${s.toUpperCase()}: ${e.message}`); }))),
+      Promise.all(ids.map((id) => historicoTitulo(id).catch((e) => { throw new Error(`Tesouro ${id}: ${e.message}`); }))),
+      ids.length ? carregarTitulos().catch(() => null) : null,
     ]);
-    const dados = { precos: Object.fromEntries(precos.map((p) => [p.ticker, p])), indices: Object.fromEntries(indices.map((x) => [x.serie, x.dados])) };
-    SIM_RES = { cfg, res: cfg.carteiras.map((c) => simular({ de: cfg.de, ate: cfg.ate || null, dia: c.dia, edicoes: c.edicoes, extras: c.extras, aporte: Number(c.aporte), proventos: c.proventos, preco: c.preco, itens: c.itens }, dados)) };
+    const dados = { precos: Object.fromEntries(precos.map((p) => [p.ticker, p])), indices: Object.fromEntries(indices.map((x) => [x.serie, x.dados])), titulos: Object.fromEntries(titulos.map((t) => [t.id, t])) };
+    SIM_RES = { cfg, tesouroAte: listaTes?.tesouroAte || null, res: cfg.carteiras.map((c) => simular({ de: cfg.de, ate: cfg.ate || null, dia: c.dia, edicoes: c.edicoes, extras: c.extras, aporte: Number(c.aporte), proventos: c.proventos, preco: c.preco, itens: c.itens }, dados)) };
     SIM_G.sel = null;
     if (SIM_RES.res.length < 2 && SIM_G.cart === 'comp') SIM_G.cart = 0;
     SIM_VISTA.cart = Math.min(SIM_VISTA.cart, SIM_RES.res.length - 1);
@@ -2744,7 +2874,7 @@ function ligarSimular() {
     }
     if (t.dataset.aporte != null) { SIM.carteiras[t.dataset.aporte].aporte = num(t.value) || 0; salvarSim(); return; }
     const row = t.closest('.sim-item');
-    if (!row || t.dataset.campo === 'tipo') return;
+    if (!row) return;
     const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
     if (t.dataset.campo === 'taxa') it.taxa = num(t.value);
     if (t.dataset.campo === 'peso') { it.peso = num(t.value) || 0; atualizaSoma(row.dataset.c); }
@@ -2754,13 +2884,6 @@ function ligarSimular() {
     const t = e.target;
     if (t.id === 'sim-de' || t.id === 'sim-ate') { if (t.value) guardarData(t.id, t.value); return; }
     if (t.dataset.dia != null) { SIM.carteiras[t.dataset.dia].dia = t.value; salvarSim(); return; }
-    if (t.dataset.campo !== 'tipo') return;
-    const row = t.closest('.sim-item');
-    const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
-    it.tipo = t.value;
-    if (TIPOS_SIM[it.tipo].taxa) it.taxa = TIPOS_SIM[it.tipo].taxa.padrao; else delete it.taxa;
-    if (it.tipo !== 'bolsa') { delete it.ticker; delete it.nome; delete it.classe; }
-    salvarSim(); redesenharCarteira(row.dataset.c);
   });
   raiz.addEventListener('click', (e) => {
     const cardAp = e.target.closest('[data-edit-aporte]');
@@ -2772,7 +2895,13 @@ function ligarSimular() {
     if (t.hasAttribute('data-escolher')) {
       const row = t.closest('.sim-item');
       const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
-      abrirEscolherAtivo((a) => { it.ticker = a.ticker; it.nome = a.nome; it.classe = a.classe; salvarSim(); redesenharCarteira(row.dataset.c); });
+      abrirEscolherAtivo((a) => {
+        for (const k of ['ticker', 'classe', 'titulo', 'nome', 'taxa']) delete it[k];
+        if (a.rf) Object.assign(it, { tipo: a.rf, taxa: TIPOS_SIM[a.rf].taxa.padrao });
+        else if (a.titulo) Object.assign(it, { tipo: 'titulo', titulo: a.titulo, nome: a.nome });
+        else Object.assign(it, { tipo: 'bolsa', ticker: a.ticker, nome: a.nome, classe: a.classe });
+        salvarSim(); redesenharCarteira(row.dataset.c);
+      }, { titulos: true, rendaFixa: true, tesouroPrimeiro: it.tipo === 'titulo' });
       return;
     }
     if (t.hasAttribute('data-novo-aporte')) { abrirEditarAporteSim(null); return; }
@@ -2856,9 +2985,10 @@ function htmlGlossarioSim() {
       ${it('Preço de compra', 'A bolsa guarda, para cada dia, abertura (10h), mínima, máxima e fechamento (cerca de 18h). O app compra pelo que você escolher; o preço de cada hora do dia não fica guardado nas fontes grátis. Cada compra mostra a faixa do dia para você comparar.')}
       ${it('Cotas inteiras e sobra', 'Na bolsa só se compra cota inteira. O que não dá para uma cota fica em caixa e entra no aporte do mês seguinte.')}
       ${it('Taxas', 'Ações, FIIs e ETFs pagam 0,03% de taxas da B3 em cada compra (corretagem zero). Tesouro e CDB não têm taxa na compra; a custódia do Tesouro não está na conta.')}
+      ${it('Tesouro Direto', 'Cada título usa o preço real de cada dia: compra pelo preço de compra (em frações de 0,01 título) e vale pelo preço de venda, que é o que você receberia vendendo naquele dia (marcação a mercado). Por isso um IPCA+ ou Prefixado longo pode cair quando os juros sobem. Os juros semestrais entram como provento, já sem o IR.')}
       ${it('IR da renda fixa', 'Tesouro e CDB pagam IR só no resgate, de 22,5% (até 6 meses) a 15% (mais de 2 anos) sobre o rendimento. LCI/LCA é isenta. Ações vendidas até R$ 20 mil por mês são isentas; FIIs pagam 20% sobre o lucro na venda.')}
     </dl>
-    <p class="dica">Fontes: preços e proventos do Yahoo Finance; tipo e data de pagamento dos proventos do Status Invest (ou da brapi); Selic, CDI e IPCA do Banco Central. É uma estimativa, não recomendação de investimento.</p>
+    <p class="dica">Fontes: preços e proventos do Yahoo Finance; tipo e data de pagamento dos proventos do Status Invest (ou da brapi); Selic, CDI e IPCA do Banco Central; títulos do Tesouro pelo histórico oficial de preços e taxas do Tesouro Direto e, nos dias que ele ainda não publicou, pela taxa de mercado da ANBIMA. É uma estimativa, não recomendação de investimento.</p>
   </details>`;
 }
 

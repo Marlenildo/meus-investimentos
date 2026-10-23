@@ -4,18 +4,23 @@
 // Ativos de bolsa (ações, FIIs, ETFs, BDRs): compra no fechamento do primeiro dia útil do mês,
 // só cotas inteiras, com 0,03% de taxas da B3; o que sobra fica em caixa para o mês seguinte.
 // Proventos (dividendos e JCP por cota, do Yahoo) entram para quem tinha a cota antes da data-com.
-// Renda fixa: o valor rende dia a dia pela taxa escolhida (Selic, % do CDI, IPCA + taxa, prefixado),
-// sem marcação a mercado — é o valor "na curva", como se fosse levado até o vencimento.
+// Títulos do Tesouro Direto: compra pelo preço de compra do dia (frações de 0,01 título, sem taxa) e vale
+// pelo preço de venda do dia (marcação a mercado, o que você receberia vendendo). Juros semestrais entram como
+// provento, já sem o IR. Depois do vencimento, o valor fica parado.
+// CDB e LCI/LCA (e os tipos antigos de Tesouro por taxa): o valor rende dia a dia pela taxa escolhida, sem
+// marcação a mercado — é o valor "na curva", como se fosse levado até o vencimento.
 import { TAXA_B3_PADRAO, aliquotaRendaFixa } from './calc.js';
 
 /** Tipos de investimento que o simulador conhece. */
 export const TIPOS_SIM = {
   bolsa: { nome: 'Ação, FII ou ETF', curto: 'Bolsa' },
-  selic: { nome: 'Tesouro Selic', curto: 'Tesouro Selic', taxa: null },
-  ipca: { nome: 'Tesouro IPCA+', curto: 'Tesouro IPCA+', taxa: { rotulo: 'IPCA +', sufixo: '% ao ano', padrao: 6 } },
-  pre: { nome: 'Tesouro Prefixado', curto: 'Tesouro Prefixado', taxa: { rotulo: 'Taxa', sufixo: '% ao ano', padrao: 12 } },
+  titulo: { nome: 'Tesouro Direto', curto: 'Tesouro' },
   cdb: { nome: 'CDB (% do CDI)', curto: 'CDB', taxa: { rotulo: 'Rende', sufixo: '% do CDI', padrao: 100 } },
   lci: { nome: 'LCI/LCA (% do CDI, isenta)', curto: 'LCI/LCA', taxa: { rotulo: 'Rende', sufixo: '% do CDI', padrao: 90 } },
+  // antigos: Tesouro calculado só pela taxa (continuam funcionando nas carteiras já montadas)
+  selic: { nome: 'Selic do dia (sem título)', curto: 'Tesouro Selic', taxa: null, antigo: true },
+  ipca: { nome: 'IPCA + taxa fixa (sem título)', curto: 'Tesouro IPCA+', taxa: { rotulo: 'IPCA +', sufixo: '% ao ano', padrao: 6 }, antigo: true },
+  pre: { nome: 'Prefixado com taxa fixa (sem título)', curto: 'Tesouro Prefixado', taxa: { rotulo: 'Taxa', sufixo: '% ao ano', padrao: 12 }, antigo: true },
 };
 export const ehRendaFixa = (tipo) => tipo !== 'bolsa';
 
@@ -32,6 +37,7 @@ export function seriesNecessarias(itens) {
 /** Nome curto de um item ("PETR4", "Tesouro IPCA+ 6%", "CDB 110% CDI"). */
 export function rotuloItem(it) {
   if (it.tipo === 'bolsa') return String(it.ticker || '').toUpperCase() || '—';
+  if (it.tipo === 'titulo') return it.nome || 'Tesouro Direto';
   const n = (v) => Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
   if (it.tipo === 'selic') return 'Tesouro Selic';
   if (it.tipo === 'ipca') return `Tesouro IPCA+ ${n(it.taxa)}%`;
@@ -116,6 +122,7 @@ export const TIPOS_PROV_SIM = {
   dividendo: 'Dividendo',
   jcp: 'JCP',
   rendimento: 'Rendimento',
+  juros: 'Juros do Tesouro',
   outro: 'Outro provento',
   provento: 'Provento (tipo não informado)',
 };
@@ -124,6 +131,7 @@ export const IR_JCP = 0.15; // JCP tem 15% de IR retido na fonte; dividendos e r
 /** Classe do item, com as mesmas chaves do gráfico do Histórico: acao, fii, outros (ETF/BDR), tesouro, rf. */
 export function classeSim(it) {
   if (it.tipo === 'bolsa') return it.classe === 'fii' ? 'fii' : ['etf', 'bdr'].includes(it.classe) ? 'outros' : 'acao';
+  if (it.tipo === 'titulo') return 'tesouro';
   return it.tipo === 'cdb' || it.tipo === 'lci' ? 'rf' : 'tesouro';
 }
 
@@ -133,7 +141,8 @@ export function classeSim(it) {
  *   proventos 'dentro': o aporte é o total investido no mês; os proventos recebidos desde o aporte anterior pagam parte e do bolso sai só a diferença.
  *   proventos 'somar':  sai o aporte inteiro do bolso e os proventos entram por cima.
  *   proventos 'guardar': sai o aporte inteiro do bolso e os proventos ficam com você, fora da carteira.
- * @param {object} dados { precos: {TICKER: {dias: [[dia, fech, abert, mín, máx]], proventos: [{data (ex), valor, tipo?, pagamento?, com?}], splits}}, indices: {selic, cdi?, ipca?} }
+ * @param {object} dados { precos: {TICKER: {dias: [[dia, fech, abert, mín, máx]], proventos: [{data (ex), valor, tipo?, pagamento?, com?}], splits}}, indices: {selic, cdi?, ipca?},
+ *   titulos: {ID: {venc, indexador, dias: [[dia, taxaCompra, taxaVenda, puCompra, puVenda, estimado?]], cupons: [[dia, valor por título]]}} }
  *
  * Proventos: o direito é de quem tinha a cota no fim da data-com (antes da data ex); o dinheiro entra na data de
  * pagamento (sem a data, na própria data ex). JCP entra líquido, já sem os 15% de IR.
@@ -145,6 +154,7 @@ export function simular(cfg, dados) {
   if (!pesoTotal) throw new Error('coloque um percentual em pelo menos um investimento');
   for (const it of cfg.itens) {
     if (it.tipo === 'bolsa' && !dados.precos[it.ticker]?.dias?.length) throw new Error(`sem preços de ${it.ticker}`);
+    if (it.tipo === 'titulo' && !dados.titulos?.[it.titulo]?.dias?.length) throw new Error(`sem preços de ${it.nome || it.titulo}`);
   }
   const agenda = agendaAportes(calendario, cfg);
   const fim = agenda.fim;
@@ -172,6 +182,13 @@ export function simular(cfg, dados) {
       p.fatorFuturo = (d) => p.splits.filter((s) => s.data > d).reduce((f, s) => f * s.fator, 1);
       p.provs = (h.proventos || []).filter((x) => x.data >= inicioDia).map((x) => ({ ...x, tipo: x.tipo || (p.fii ? 'rendimento' : 'provento') }));
       p.iProv = 0;
+    } else if (it.tipo === 'titulo') {
+      const h = dados.titulos[it.titulo];
+      p.ticker = p.rotulo;
+      p.venc = h.venc;
+      p.dias = h.dias;
+      p.cupons = (h.cupons || []).filter((c) => c[0] >= inicioDia);
+      p.iCupom = 0;
     }
     return p;
   });
@@ -185,7 +202,8 @@ export function simular(cfg, dados) {
       default: return 1;
     }
   };
-  const valorItem = (p, d) => (p.tipo === 'bolsa' ? p.qtd * (ultimoAte(p.dias, d) || 0) : p.lotes.reduce((s, l) => s + l.valor, 0));
+  const puVenda = (p, d) => linhaAte(p.dias, d)?.[4] || 0;
+  const valorItem = (p, d) => (p.tipo === 'bolsa' ? p.qtd * (ultimoAte(p.dias, d) || 0) : p.tipo === 'titulo' ? p.qtd * puVenda(p, d) : p.lotes.reduce((s, l) => s + l.valor, 0));
   const valorRF = (d) => pos.reduce((s, p) => s + (p.tipo === 'bolsa' ? 0 : valorItem(p, d)), 0);
 
   let caixa = 0; // sobra das compras (cotas inteiras), fica para o mês seguinte
@@ -220,7 +238,18 @@ export function simular(cfg, dados) {
     if (d > fim) break;
     if (d < inicioDia) { anterior = d; continue; }
     // 1. a renda fixa rende o dia anterior
-    if (anterior) for (const p of pos) if (p.tipo !== 'bolsa') { const f = fatorDoDia(p, anterior); for (const l of p.lotes) l.valor *= f; }
+    if (anterior) for (const p of pos) if (p.tipo !== 'bolsa' && p.tipo !== 'titulo') { const f = fatorDoDia(p, anterior); for (const l of p.lotes) l.valor *= f; }
+    // juros semestrais dos títulos: pagos a quem tinha o título, com o IR da tabela regressiva de cada compra
+    for (const p of pos) {
+      if (p.tipo !== 'titulo') continue;
+      while (p.iCupom < p.cupons.length && p.cupons[p.iCupom][0] <= d) {
+        const [dia, porTitulo] = p.cupons[p.iCupom++];
+        if (p.qtd <= 0) continue;
+        const bruto = p.qtd * porTitulo;
+        const ir = p.lotes.reduce((s, l) => s + l.qtd * porTitulo * aliquotaRendaFixa(diasEntre(l.data, dia)), 0);
+        receber({ p, tipo: 'juros', ex: dia, cotas: p.qtd, porCota: porTitulo, bruto, ir, valor: bruto - ir }, d);
+      }
+    }
     // 2. data ex chegou: quem tinha a cota antes ganha o direito ao provento
     for (const p of pos) {
       if (p.tipo !== 'bolsa') continue;
@@ -262,6 +291,20 @@ export function simular(cfg, dados) {
           const c = { p, d, fator, precoReal, custoCota, n, falta: verba - n * custoCota, vela, diaVela: vela[0] };
           resta -= n * custoCota;
           compras.push(c);
+        } else if (p.tipo === 'titulo') {
+          const linha = linhaAte(p.dias, d);
+          if (!linha || d >= p.venc) continue; // ainda não existia, ou já venceu: a verba fica em caixa
+          const pu = linha[3] || linha[4];
+          const n = Math.floor((verba / pu) * 100 + 1e-9) / 100; // o Tesouro vende em frações de 0,01 título
+          if (n <= 0) continue;
+          const valor = n * pu;
+          p.qtd = Math.round((p.qtd + n) * 100) / 100;
+          p.lotes.push({ data: d, qtd: n, aplicado: valor });
+          p.aplicado += valor;
+          m.rfAplicado += valor;
+          m.aplicado[p.classe] = (m.aplicado[p.classe] || 0) + valor;
+          resta -= valor;
+          ops.push({ tipo: 'aplicacao', data: d, rotulo: p.rotulo, rf: 'titulo', valor, qtd: n, preco: pu, taxa: linha[1], indexador: dados.titulos[p.titulo].indexador, diaPreco: linha[0], estimado: Boolean(linha[5]) });
         } else if (verba > 0) {
           p.lotes.push({ data: d, aplicado: verba, valor: verba });
           p.aplicado += verba;
@@ -297,11 +340,15 @@ export function simular(cfg, dados) {
   const linhas = pos.map((p) => {
     const valor = valorItem(p, fim);
     const ir = p.tipo === 'bolsa' || p.tipo === 'lci' ? 0
+      : p.tipo === 'titulo' ? p.lotes.reduce((s, l) => s + Math.max(0, l.qtd * puVenda(p, fim) - l.aplicado) * aliquotaRendaFixa(diasEntre(l.data, fim)), 0)
       : p.lotes.reduce((s, l) => s + Math.max(0, l.valor - l.aplicado) * aliquotaRendaFixa(diasEntre(l.data, fim)), 0);
     return {
       rotulo: p.rotulo, tipo: p.tipo, classe: p.classe, ticker: p.ticker, fii: p.fii, peso: p.peso, aplicado: p.aplicado + p.custos, custos: p.custos,
-      qtd: p.tipo === 'bolsa' ? Math.round(p.qtd * 1000) / 1000 : null,
-      preco: p.tipo === 'bolsa' ? ultimoAte(p.dias, fim) : null,
+      qtd: p.tipo === 'bolsa' ? Math.round(p.qtd * 1000) / 1000 : p.tipo === 'titulo' ? p.qtd : null,
+      preco: p.tipo === 'bolsa' ? ultimoAte(p.dias, fim) : p.tipo === 'titulo' ? puVenda(p, fim) : null,
+      // título: se venceu no período, desde quando existe e se o preço do fim é estimado
+      venc: p.venc || null, venceu: p.venc ? p.venc <= fim : false, desde: p.tipo === 'titulo' ? p.dias[0][0] : null,
+      estimado: p.tipo === 'titulo' ? Boolean(linhaAte(p.dias, fim)?.[5]) : false,
       valor, proventos: p.proventos, porTipo: p.porTipo, ir,
       // valorização das cotas (bolsa) ou rendimento (renda fixa)
       valorizacao: valor - (p.aplicado + p.custos),
@@ -315,12 +362,13 @@ export function simular(cfg, dados) {
   const rendimentoRF = linhas.filter((l) => l.tipo !== 'bolsa').reduce((s, l) => s + l.valorizacao, 0);
   const provTipos = {};
   for (const l of linhas) for (const [k, v] of Object.entries(l.porTipo)) provTipos[k] = (provTipos[k] || 0) + v;
-  const irJcp = ops.filter((o) => o.tipo === 'provento').reduce((s, o) => s + o.ir, 0);
+  const irJcp = ops.filter((o) => o.tipo === 'provento' && o.ptipo === 'jcp').reduce((s, o) => s + o.ir, 0);
+  const irJuros = ops.filter((o) => o.tipo === 'provento' && o.ptipo === 'juros').reduce((s, o) => s + o.ir, 0);
   const valorizacao = total - bolso - proventos;
   return {
     inicio: agenda.lista[0].data, de: inicioDia, fim, ateHoje: fim === calendario[calendario.length - 1], nAportes: agenda.lista.length,
     agenda: agenda.lista, removidos: agenda.removidos, nEditados: agenda.lista.filter((a) => a.editado).length + agenda.removidos.length, modo, modoPreco, aporteMes: cfg.aporte,
-    bolso, reinvestido, investido: bolso + reinvestido, posicao, caixa, provPend, proventos, provTipos, irJcp, provFora,
+    bolso, reinvestido, investido: bolso + reinvestido, posicao, caixa, provPend, proventos, provTipos, irJcp, irJuros, provFora,
     aReceber, aReceberTotal: aReceber.reduce((s, x) => s + x.valor, 0),
     // ganho sobre o que saiu do bolso = valorização das cotas + rendimento da renda fixa + proventos recebidos
     total, ganho: total - bolso, ganhoPct: bolso ? total / bolso - 1 : 0,

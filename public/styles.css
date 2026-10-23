@@ -138,6 +138,9 @@ input[type="checkbox"]:hover:not(:disabled) { border-color: var(--violeta); }
 input[type="checkbox"]:checked {
   border-color: var(--violeta); background: var(--violeta) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3.5 8.2 2.9 2.9 6-6.2' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat;
 }
+input[type="checkbox"]:indeterminate {
+  border-color: var(--violeta); background: var(--violeta) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E") center / 14px no-repeat;
+}
 input[type="checkbox"]:focus-visible { outline: 2px solid var(--violeta); outline-offset: 2px; }
 input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -281,6 +284,11 @@ input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
 .logo-ativo.fii { background: var(--chip-fii); color: var(--chip-fii-t); }
 .logo-ativo.tesouro { background: var(--chip-tes); color: var(--chip-tes-t); }
 .logo-ativo.etf, .logo-ativo.bdr { background: var(--chip-outro); color: var(--chip-outro-t); }
+/* títulos do Tesouro: ícone próprio, na cor do indexador */
+.logo-ativo.tesouro svg { width: 58%; height: 58%; }
+.logo-ativo.ix-selic { background: color-mix(in srgb, var(--ciano) 16%, transparent); color: var(--ciano); }
+.logo-ativo.ix-pre { background: var(--chip-outro); color: var(--chip-outro-t); }
+.logo-ativo.ix-ipca { background: var(--chip-tes); color: var(--chip-tes-t); }
 .logo-ativo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; opacity: 0; transition: opacity 0.2s ease; }
 .logo-ativo img.ok { opacity: 1; }
 /* com o logo carregado, ele mesmo é o ícone arredondado: sem fundo nem borda por trás */
@@ -913,18 +921,18 @@ html, body { overflow-x: clip; }
 .sim-carteira h2, .sim-h { display: flex; align-items: center; gap: 8px; }
 .sim-soma { color: var(--tinta-3); }
 .sim-itens { display: grid; gap: 8px; }
-.sim-item { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 76px 36px; gap: 8px; align-items: center; }
+/* uma linha: investimento (botão que abre a busca) · taxa, só em CDB/LCI · % do aporte · tirar */
+.sim-item { display: grid; grid-template-columns: minmax(0, 1fr) 76px 36px; gap: 8px; align-items: center; }
+.sim-item.com-taxa { grid-template-columns: minmax(0, 1fr) minmax(0, 150px) 76px 36px; }
 .sim-item input { width: 100%; margin: 0; }
-.sim-tipo { min-width: 0; display: grid; }
-.sim-tipo > * { width: 100%; min-width: 0; }
 .sim-taxa, .sim-peso { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .sim-taxa small, .sim-peso small { color: var(--tinta-3); font-size: 0.76rem; white-space: nowrap; }
 .sim-taxa input { min-width: 0; text-align: right; }
 .sim-peso input { text-align: right; }
 .sim-ticker { text-transform: uppercase; }
 @media (max-width: 480px) {
-  .sim-item { grid-template-columns: minmax(0, 1fr) 76px 36px; }
-  .sim-tipo { grid-column: 1 / -1; }
+  .sim-item.com-taxa { grid-template-columns: minmax(0, 1fr) 76px 36px; }
+  .sim-item.com-taxa .sim-ativo-btn { grid-column: 1 / -1; }
 }
 .sim-acoes { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 560px) { .sim-acoes .btn { flex: 1; } }
@@ -1017,12 +1025,16 @@ html, body { overflow-x: clip; }
 .sim-ativo-btn { display: flex; align-items: center; gap: 8px; min-width: 0; height: 42px; padding: 0 10px; border: 1px solid var(--linha-forte); border-radius: var(--raio-p); background: var(--campo); color: inherit; cursor: pointer; text-align: left; }
 .sim-ativo-btn:hover { border-color: color-mix(in srgb, var(--violeta) 45%, var(--linha-forte)); }
 .sim-ativo-btn:focus-visible { outline: none; border-color: var(--violeta); box-shadow: 0 0 0 3px var(--acento-suave); }
-.sim-ativo-btn .logo-ativo { width: 26px; height: 26px; flex: none; }
+.sim-ativo-btn .logo-ativo { width: 28px; height: 28px; flex: none; border-radius: 8px; font-size: 0.66rem; }
+.logo-ativo.rf { background: color-mix(in srgb, var(--s-outros) 14%, transparent); color: var(--s-outros); }
+.chip.rf { background: color-mix(in srgb, var(--s-outros) 14%, transparent); color: var(--s-outros); }
 .sa-txt { display: grid; min-width: 0; line-height: 1.15; }
 .sa-txt b { font: 700 0.9rem var(--f-display); }
 .sa-txt small { font-size: 0.72rem; color: var(--tinta-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sim-ativo-btn.vazio { border-style: dashed; }
 .sim-ativo-btn.vazio b { color: var(--violeta); }
+.sim-notas-tes { display: grid; gap: 6px; padding: 10px 14px; border-radius: var(--raio); background: var(--folha-2); }
+.sim-notas-tes b { color: var(--tinta); font-weight: 600; }
 
 /* resultado: proventos por tipo, operações e glossário */
 .campo-seg { grid-template-rows: auto auto auto; }
@@ -1064,8 +1076,8 @@ html, body { overflow-x: clip; }
 .sim-aporte-in { display: flex; align-items: center; gap: 6px; }
 .sim-aporte-in small { color: var(--tinta-3); }
 .sim-aporte-in input { width: 130px; text-align: right; font-weight: 700; }
-.sim-itens-cab { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 76px 36px; gap: 8px; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-3); }
-.sim-itens-cab span:nth-child(3) { white-space: nowrap; }
+.sim-itens-cab { display: grid; grid-template-columns: minmax(0, 1fr) 76px 36px; gap: 8px; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-3); }
+.sim-itens-cab span:nth-child(2) { white-space: nowrap; text-align: right; }
 @media (max-width: 480px) { .sim-itens-cab { display: none; } }
 .sim-itens-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
 .sim-opcoes { display: grid; gap: 14px; padding-top: 12px; border-top: 1px solid var(--linha); }
@@ -1154,6 +1166,8 @@ table.resp .rv { display: block; }
 .dv-lista { display: grid; gap: 4px; }
 .dv-item { display: grid; grid-template-columns: 26px 32px minmax(0, 1fr) 92px minmax(96px, auto); gap: 10px; align-items: center; padding: 6px 4px; border-bottom: 1px solid var(--linha); }
 .dv-check { display: grid; place-items: center; width: 26px; height: 32px; cursor: pointer; }
+.dv-todos { display: flex; align-items: center; gap: 10px; padding: 2px 4px 6px; border-bottom: 1px solid var(--linha-forte); font-weight: 600; font-size: 0.9rem; cursor: pointer; }
+.dv-todos small { margin-left: auto; font-weight: 500; font-size: 0.78rem; color: var(--tinta-3); }
 .dv-item .logo-ativo { width: 32px; height: 32px; border-radius: 9px; font-size: 0.7rem; cursor: default; }
 .dv-nome { display: grid; min-width: 0; }
 .dv-nome b { font: 700 0.92rem var(--f-display); }

@@ -2,7 +2,7 @@
 // - Serve o site (pasta public/) e a API em /api/*.
 // - Guarda ativos, compras, proventos e ajustes no D1 (binding DB).
 // - Busca cotações no Yahoo Finance (atraso de ~15 min na B3), com a brapi como reserva.
-// - Os dados exigem a senha definida na variável SENHA; /api/saude, /api/cotacoes, /api/historico, /api/preco-dia e /api/sim/* são públicos.
+// - Os dados exigem a senha definida na variável SENHA; /api/saude, /api/cotacoes, /api/historico, /api/preco-dia, /api/sim/* e /api/tesouro/* são públicos.
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS config (chave TEXT PRIMARY KEY, valor TEXT NOT NULL, atualizado_em TEXT)`,
@@ -136,6 +136,14 @@ const stmtProvento = (db, p) => db.prepare('INSERT OR REPLACE INTO proventos (id
   .bind(p.id, p.data, p.ticker, p.tipo, p.valor, agora(), p.banco);
 
 // ---------- cotações ----------
+const DADOS_TESOURO = 'https://raw.githubusercontent.com/Marlenildo/meus-investimentos/dados/tesouro/';
+/** Repassa um arquivo dos dados do Tesouro, guardado no cache da Cloudflare (DADOS_TESOURO_URL troca a origem, para testar). */
+async function dadosTesouro(arquivo, ttl, env) {
+  const r = await fetch((env.DADOS_TESOURO_URL || DADOS_TESOURO) + arquivo, { cf: { cacheTtl: ttl, cacheEverything: true } });
+  if (!r.ok) return erro(r.status === 404 ? 404 : 502, r.status === 404 ? 'Esse título não está nos dados do Tesouro.' : 'Os dados do Tesouro não responderam agora.');
+  return new Response(r.body, { headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': `public, max-age=${Math.min(ttl, 1800)}` } });
+}
+
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 async function cotacaoYahoo(ticker) {
@@ -475,6 +483,15 @@ async function api(req, env, url) {
     const s = url.searchParams.get('s');
     if (!SERIES_BCB[s]) return erro(400, 'Série inválida (use selic, cdi ou ipca).');
     return json(await serieBCB(s, dataISO(url.searchParams.get('de'))));
+  }
+
+  // Tesouro Direto: lista de títulos (com o preço de hoje) e o histórico de cada um,
+  // montados todo dia útil pelo GitHub Actions (scripts/tesouro.py) no branch "dados" do repositório
+  if (caminho === 'tesouro/titulos' && metodo === 'GET') return dadosTesouro('titulos.json', 1800, env);
+  if (caminho.startsWith('tesouro/titulo/') && metodo === 'GET') {
+    const id = caminho.slice('tesouro/titulo/'.length);
+    if (!/^(LFT|LTN|NTNF|NTNBP|NTNB|NTNB1)-\d{4}-\d{2}-\d{2}$/.test(id)) return erro(400, 'Título inválido.');
+    return dadosTesouro(`titulos/${id}.json`, 3 * 3600, env);
   }
 
   const negado = await conferirSenha(req, env);

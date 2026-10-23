@@ -13,10 +13,10 @@ import { TAXA_B3_PADRAO, aliquotaRendaFixa } from './calc.js';
 
 /** Tipos de investimento que o simulador conhece. */
 export const TIPOS_SIM = {
-  bolsa: { nome: 'Ação, FII ou ETF', curto: 'Bolsa' },
+  bolsa: { nome: 'Ação, FII ou ETF', curto: 'Ações' },
   titulo: { nome: 'Tesouro Direto', curto: 'Tesouro' },
   cdb: { nome: 'CDB (% do CDI)', curto: 'CDB', taxa: { rotulo: 'Rende', sufixo: '% do CDI', padrao: 100 } },
-  lci: { nome: 'LCI/LCA (% do CDI, isenta)', curto: 'LCI/LCA', taxa: { rotulo: 'Rende', sufixo: '% do CDI', padrao: 90 } },
+  lci: { nome: 'LCI/LCA (isenta)', curto: 'LCI/LCA', taxa: { rotulo: 'Rende', sufixo: '% do CDI', padrao: 90 } },
   // antigos: Tesouro calculado só pela taxa (continuam funcionando nas carteiras já montadas)
   selic: { nome: 'Selic do dia (sem título)', curto: 'Tesouro Selic', taxa: null, antigo: true },
   ipca: { nome: 'IPCA + taxa fixa (sem título)', curto: 'Tesouro IPCA+', taxa: { rotulo: 'IPCA +', sufixo: '% ao ano', padrao: 6 }, antigo: true },

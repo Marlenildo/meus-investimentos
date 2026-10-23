@@ -921,19 +921,20 @@ html, body { overflow-x: clip; }
 .sim-carteira h2, .sim-h { display: flex; align-items: center; gap: 8px; }
 .sim-soma { color: var(--tinta-3); }
 .sim-itens { display: grid; gap: 8px; }
-/* uma linha: investimento (botão que abre a busca) · taxa, só em CDB/LCI · % do aporte · tirar */
-.sim-item { display: grid; grid-template-columns: minmax(0, 1fr) 76px 36px; gap: 8px; align-items: center; }
-.sim-item.com-taxa { grid-template-columns: minmax(0, 1fr) minmax(0, 150px) 76px 36px; }
+/* cada investimento numa linha: tipo · ativo escolhido (ou a taxa) · % do aporte · tirar; o ativo fica com mais espaço */
+.sim-item { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.35fr) 66px 32px; gap: 6px; align-items: center; }
+.sim-tipo { min-width: 0; display: grid; }
+.sim-tipo > * { width: 100%; min-width: 0; }
+.sim-tipo .sel-btn { padding: 0 8px 0 10px; font-size: 0.86rem; }
+.sim-item .sim-ativo-btn { padding: 0 8px; gap: 7px; }
+.sim-item .sim-peso input { padding: 0 8px; }
 .sim-item input { width: 100%; margin: 0; }
 .sim-taxa, .sim-peso { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .sim-taxa small, .sim-peso small { color: var(--tinta-3); font-size: 0.76rem; white-space: nowrap; }
 .sim-taxa input { min-width: 0; text-align: right; }
 .sim-peso input { text-align: right; }
 .sim-ticker { text-transform: uppercase; }
-@media (max-width: 480px) {
-  .sim-item.com-taxa { grid-template-columns: minmax(0, 1fr) 76px 36px; }
-  .sim-item.com-taxa .sim-ativo-btn { grid-column: 1 / -1; }
-}
+
 .sim-acoes { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 560px) { .sim-acoes .btn { flex: 1; } }
 #sim-saida { display: grid; gap: 16px; }
@@ -1076,9 +1077,13 @@ html, body { overflow-x: clip; }
 .sim-aporte-in { display: flex; align-items: center; gap: 6px; }
 .sim-aporte-in small { color: var(--tinta-3); }
 .sim-aporte-in input { width: 130px; text-align: right; font-weight: 700; }
-.sim-itens-cab { display: grid; grid-template-columns: minmax(0, 1fr) 76px 36px; gap: 8px; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-3); }
-.sim-itens-cab span:nth-child(2) { white-space: nowrap; text-align: right; }
-@media (max-width: 480px) { .sim-itens-cab { display: none; } }
+.sim-itens-cab { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.35fr) 66px 32px; gap: 8px; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--tinta-3); }
+.sim-itens-cab span:nth-child(3) { white-space: nowrap; }
+@media (max-width: 480px) {
+  .sim-itens-cab { display: none; }
+  .sim-item { grid-template-columns: minmax(0, 1fr) 66px 32px; }
+  .sim-tipo { grid-column: 1 / -1; }
+}
 .sim-itens-acoes { display: flex; flex-wrap: wrap; gap: 8px; }
 .sim-opcoes { display: grid; gap: 14px; padding-top: 12px; border-top: 1px solid var(--linha); }
 .sim-op { display: grid; gap: 8px; }
@@ -1117,6 +1122,10 @@ html, body { overflow-x: clip; }
 .sh-leg { display: grid; gap: 4px; font-size: 0.86rem; color: var(--tinta-2); }
 .sh-leg span { display: flex; align-items: center; gap: 8px; }
 .sh-leg b { margin-left: auto; color: var(--tinta); font-weight: 600; }
+.sim-herois > *, .sh-cab, .sh-cab b { min-width: 0; max-width: 100%; } /* nome comprido da carteira corta com reticências, sem alargar o cartão */
+.sh-comp { overflow-wrap: anywhere; }
+.sh-onde { font-size: 0.78rem; color: var(--tinta-3); line-height: 1.45; }
+.sh-onde b { color: var(--tinta-2); font-weight: 600; }
 .sim-det > summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; color: var(--link); list-style: none; padding: 4px 0; }
 .sim-det > summary::-webkit-details-marker { display: none; }
 .sim-det > summary::after { content: " ›"; display: inline-block; transition: transform 0.15s ease; }

@@ -14,7 +14,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.13.0';
+export const VERSAO = '1.13.1';
 const VERSAO_DATA = '2026-10-23';
 
 let S = carregar();
@@ -2020,21 +2020,20 @@ const clsV = (v) => (v >= 0 ? 'var-alta' : 'var-baixa');
 
 function htmlItemSim(it, ci, ii) {
   const t = TIPOS_SIM[it.tipo] || TIPOS_SIM.bolsa;
-  const rf = it.tipo !== 'bolsa' && it.tipo !== 'titulo';
-  const conteudo = it.tipo === 'titulo'
-    ? (it.titulo ? `${htmlLogo({ ticker: it.nome, tipo: 'tesouro' })}<span class="sa-txt"><b title="${esc(it.nome)}">${esc(String(it.nome || '').replace(/^Tesouro /, ''))}</b><small>Tesouro Direto · vence ${dataBR(it.titulo.slice(-10))}</small></span>`
-      : '<span class="sa-txt"><b>Escolher título</b><small>Selic, Prefixado, IPCA+…</small></span>')
+  const baixo = it.tipo === 'titulo'
+    ? `<button type="button" class="sim-ativo-btn ${it.titulo ? '' : 'vazio'}" data-escolher aria-label="${it.titulo ? `Trocar ${esc(it.nome)}` : 'Escolher título do Tesouro'}">
+        ${it.titulo ? `${htmlLogo({ ticker: it.nome, tipo: 'tesouro' })}<span class="sa-txt"><b title="${esc(it.nome)}">${esc(String(it.nome || '').replace(/^Tesouro /, ''))}</b><small>vence ${dataBR(it.titulo.slice(-10))}</small></span>` : '<span class="sa-txt"><b>Escolher título</b><small>Selic, Prefixado, IPCA+, Renda+…</small></span>'}
+      </button>`
     : it.tipo === 'bolsa'
-      ? (it.ticker ? `${htmlLogo({ ticker: it.ticker, tipo: it.classe || 'acao' })}<span class="sa-txt"><b>${esc(it.ticker)}</b><small>${esc(it.nome || nomeDoAtivo(it.ticker) || '')}</small></span>`
-        : '<span class="sa-txt"><b>Escolher investimento</b><small>ação, FII, Tesouro, CDB…</small></span>')
-      : `<span class="logo-ativo rf" aria-hidden="true"><span>RF</span></span><span class="sa-txt"><b>${esc(t.curto)}</b><small>${esc(t.antigo ? 'calculado pela taxa' : it.tipo === 'lci' ? '% do CDI, isenta de IR' : '% do CDI')}</small></span>`;
-  const vazio = (it.tipo === 'bolsa' && !it.ticker) || (it.tipo === 'titulo' && !it.titulo);
-  const taxa = !rf ? '' : t.taxa
-    ? `<span class="sim-taxa"><input class="num" data-campo="taxa" inputmode="decimal" value="${esc(String(it.taxa ?? t.taxa.padrao).replace('.', ','))}" aria-label="${esc(t.taxa.rotulo)}"><small>${esc(t.taxa.sufixo)}</small></span>`
-    : '<span class="sim-taxa"><small>rende a Selic do dia</small></span>';
-  return `<div class="sim-item ${rf ? 'com-taxa' : ''}" data-c="${ci}" data-i="${ii}">
-    <button type="button" class="sim-ativo-btn ${vazio ? 'vazio' : ''}" data-escolher aria-label="${vazio ? 'Escolher investimento' : `Trocar ${esc(it.tipo === 'bolsa' ? it.ticker : it.tipo === 'titulo' ? it.nome : t.curto)}`}">${conteudo}</button>
-    ${taxa}
+      ? `<button type="button" class="sim-ativo-btn ${it.ticker ? '' : 'vazio'}" data-escolher aria-label="${it.ticker ? `Trocar ${esc(it.ticker)}` : 'Escolher ativo'}">
+        ${it.ticker ? `${htmlLogo({ ticker: it.ticker, tipo: it.classe || 'acao' })}<span class="sa-txt"><b>${esc(it.ticker)}</b><small>${esc(it.nome || nomeDoAtivo(it.ticker) || '')}</small></span>` : '<span class="sa-txt"><b>Escolher ativo</b><small>ação, FII, ETF ou BDR</small></span>'}
+      </button>`
+      : t.taxa
+        ? `<span class="sim-taxa"><input class="num" data-campo="taxa" inputmode="decimal" value="${esc(String(it.taxa ?? t.taxa.padrao).replace('.', ','))}" aria-label="${esc(t.taxa.rotulo)}"><small>${esc(t.taxa.sufixo)}</small></span>`
+        : '<span class="sim-taxa"><small>rende a Selic do dia</small></span>';
+  return `<div class="sim-item" data-c="${ci}" data-i="${ii}">
+    <span class="sim-tipo"><select data-campo="tipo" aria-label="Tipo de investimento">${Object.entries(TIPOS_SIM).filter(([k, v]) => !v.antigo || k === it.tipo).map(([k, v]) => `<option value="${k}" ${k === it.tipo ? 'selected' : ''}>${esc(v.curto)}</option>`).join('')}</select></span>
+    ${baixo}
     <span class="sim-peso"><input class="num" data-campo="peso" inputmode="decimal" value="${esc(String(it.peso ?? '').replace('.', ','))}" aria-label="Percentual do aporte"><small>%</small></span>
     <button type="button" class="ic-btn perigo sim-tirar" data-tirar title="Tirar da carteira" aria-label="Tirar da carteira">${ICONE_LIXO}</button>
   </div>`;
@@ -2059,7 +2058,7 @@ function htmlCarteiraSim(c, ci) {
       })()}
     </div>
     <div class="sim-itens">
-      <div class="sim-itens-cab" aria-hidden="true"><span>Onde investir</span><span>% do aporte</span><span></span></div>
+      <div class="sim-itens-cab" aria-hidden="true"><span>Tipo</span><span>Onde investir</span><span>% do aporte</span><span></span></div>
       ${c.itens.map((it, ii) => htmlItemSim(it, ci, ii)).join('')}
     </div>
     <div class="sim-itens-acoes">${qtdEscolhidos >= 2 ? `<button type="button" class="btn peq" data-dividir-igual="${ci}">Dividir igualmente</button>` : ''}<button type="button" class="btn peq" data-add="${ci}">+ Investimento</button></div>
@@ -2095,7 +2094,7 @@ const CHIP_CLASSE = { acao: ['acao', 'Ação'], fii: ['fii', 'FII'], etf: ['etf'
 /**
  * Lista de ativos com busca. opts: { manual: () => void } mostra a opção de digitar à mão (CDB, LCI…);
  * { naLista: Set } marca o que já está na lista; { titulos: true } inclui os títulos do Tesouro Direto
- * ({ tesouroPrimeiro: true } mostra eles antes das ações); { rendaFixa: true } inclui CDB e LCI/LCA (simulador).
+ * ({ soTitulos: true } mostra só eles; { comDesde: true } diz desde quando cada um tem preço, para o simulador).
  */
 function abrirEscolherAtivo(aoEscolher, opts = {}) {
   const dlg = $('#dlg-ativo');
@@ -2104,19 +2103,13 @@ function abrirEscolherAtivo(aoEscolher, opts = {}) {
   if (opts.titulos && N.nuvem.servidor) carregarTitulos().then((d) => { titulos = d.titulos; }).catch(() => { titulos = []; }).finally(() => { if (dlg.open) pintar(); });
   else titulos = [];
   const itemTitulo = (t) => `<button type="button" class="pk-item" role="option" data-pick="${esc(t.nome)}" data-titulo="${esc(t.id)}" data-nome="${esc(t.nome)}" data-classe="tesouro">
-      ${htmlLogo({ ticker: t.nome, tipo: 'tesouro', indexador: t.indexador })}<span class="pk-txt"><b>${esc(t.nome)}</b><small>${t.aVenda && t.hoje?.puCompra ? `${esc(taxaTexto(t))} · ${R(t.hoje.puCompra)}${opts.rendaFixa ? ` · preços desde ${dataBR(t.desde).slice(3)}` : ''}` : `${t.venc <= hojeISO() ? 'venceu' : 'vence'} em ${dataBR(t.venc)} · preços desde ${dataBR(t.desde).slice(3)}`}</small></span>${opts.naLista?.has(t.nome) ? '<span class="pk-ja">na lista</span>' : ''}<span class="chip tesouro">Tesouro</span></button>`;
+      ${htmlLogo({ ticker: t.nome, tipo: 'tesouro', indexador: t.indexador })}<span class="pk-txt"><b>${esc(t.nome)}</b><small>${t.aVenda && t.hoje?.puCompra ? `${esc(taxaTexto(t))} · ${R(t.hoje.puCompra)}${opts.comDesde ? ` · preços desde ${dataBR(t.desde).slice(3)}` : ''}` : `${t.venc <= hojeISO() ? 'venceu' : 'vence'} em ${dataBR(t.venc)} · preços desde ${dataBR(t.desde).slice(3)}`}</small></span>${opts.naLista?.has(t.nome) ? '<span class="pk-ja">na lista</span>' : ''}<span class="chip tesouro">Tesouro</span></button>`;
   const grupoTitulos = (nome, ts) => (ts.length ? `<div class="pk-grupo"><small class="pk-tit">${esc(nome)}</small>${ts.map(itemTitulo).join('')}</div>` : '');
-  const RF = [['cdb', 'CDB', 'rende um % do CDI · paga IR'], ['lci', 'LCI ou LCA', 'rende um % do CDI · isenta de IR']];
-  const grupoRF = (q = '') => {
-    if (!opts.rendaFixa) return '';
-    const xs = RF.filter(([, n, d]) => !q || `${n} ${d} renda fixa cdi`.toLowerCase().includes(q.toLowerCase()));
-    return xs.length ? `<div class="pk-grupo"><small class="pk-tit">Renda fixa de banco</small>${xs.map(([k, n, d]) => `<button type="button" class="pk-item" role="option" data-pick="${n}" data-rf="${k}"><span class="logo-ativo rf" aria-hidden="true"><span>RF</span></span><span class="pk-txt"><b>${n}</b><small>${d}</small></span><span class="chip rf">Renda fixa</span></button>`).join('')}</div>` : '';
-  };
   const carregandoTitulos = () => (opts.titulos && titulos === null ? '<div class="pk-grupo"><small class="pk-tit">Tesouro Direto</small><p class="dica pk-buscando">Carregando os títulos do Tesouro…</p></div>' : '');
   dlg.innerHTML = `
     <form method="dialog" class="form-edit pk-form">
-      <div class="pk-cab"><h2>Escolher ativo</h2><button class="ic-btn fechar" value="cancelar" aria-label="Fechar">${ICONE_LIMPAR}</button></div>
-      <input type="search" id="pk-q" placeholder="${opts.titulos ? 'Nome ou código — ex.: PETR4, kinea, IPCA+ 2035' : 'Nome ou código — ex.: banco do brasil, PETR4, kinea'}" autocomplete="off" spellcheck="false" enterkeyhint="search">
+      <div class="pk-cab"><h2>${opts.soTitulos ? 'Escolher título do Tesouro' : 'Escolher ativo'}</h2><button class="ic-btn fechar" value="cancelar" aria-label="Fechar">${ICONE_LIMPAR}</button></div>
+      <input type="search" id="pk-q" placeholder="${opts.soTitulos ? 'Ex.: Selic 2029, IPCA+ 2035, Renda+' : opts.titulos ? 'Nome ou código — ex.: PETR4, kinea, IPCA+ 2035' : 'Nome ou código — ex.: banco do brasil, PETR4, kinea'}" autocomplete="off" spellcheck="false" enterkeyhint="search">
       <div class="pk-lista" id="pk-lista" role="listbox" aria-label="Ativos"></div>
       ${opts.manual ? '<button type="button" class="btn peq pk-manual" id="pk-manual">CDB, LCI ou outro? Digitar à mão</button>' : ''}
     </form>`;
@@ -2134,12 +2127,12 @@ function abrirEscolherAtivo(aoEscolher, opts = {}) {
     const q = $('#pk-q', dlg).value.trim();
     if (!q) {
       const tes = grupoTitulos('Tesouro Direto à venda', (titulos || []).filter((t) => t.aVenda)) + carregandoTitulos();
-      const bolsa = grupo('Da sua carteira', meus) + Object.entries(NOME_CLASSE_CAT).map(([k, n]) => grupo(`${n} conhecidos`, CATALOGO.filter((a) => a.classe === k && !meus.some((m) => m.ticker === a.ticker)))).join('');
-      lista.innerHTML = (opts.tesouroPrimeiro ? tes + bolsa : grupo('Da sua carteira', meus) + tes + Object.entries(NOME_CLASSE_CAT).map(([k, n]) => grupo(`${n} conhecidos`, CATALOGO.filter((a) => a.classe === k && !meus.some((m) => m.ticker === a.ticker)))).join('')) + grupoRF();
+      lista.innerHTML = opts.soTitulos ? tes : grupo('Da sua carteira', meus) + tes + Object.entries(NOME_CLASSE_CAT).map(([k, n]) => grupo(`${n} conhecidos`, CATALOGO.filter((a) => a.classe === k && !meus.some((m) => m.ticker === a.ticker)))).join('');
       return;
     }
     const achados = titulos ? buscarTitulos(titulos, q) : [];
     const tesHtml = grupoTitulos('Tesouro Direto', achados.filter((t) => t.aVenda)) + grupoTitulos('Títulos que já venceram ou saíram de venda', achados.filter((t) => !t.aVenda).slice(0, 30)) + carregandoTitulos();
+    if (opts.soTitulos) { lista.innerHTML = tesHtml || '<p class="dica">Nenhum título com esse nome. Tente "Selic", "IPCA+ 2035" ou "Prefixado".</p>'; return; }
     const locais = buscarNoCatalogo([...meus, ...CATALOGO.filter((a) => !meus.some((m) => m.ticker === a.ticker))], q);
     const extra = remotos.filter((r) => !locais.some((l) => l.ticker === r.ticker));
     const cod = q.toUpperCase().replace(/\s/g, '');
@@ -2147,9 +2140,8 @@ function abrirEscolherAtivo(aoEscolher, opts = {}) {
       ? `<button type="button" class="pk-item pk-codigo" data-pick="${esc(cod)}" data-nome="" data-classe="${/11$/.test(cod) ? 'fii' : 'acao'}"><span class="pk-txt"><b>Usar ${esc(cod)}</b><small>o código que você digitou</small></span></button>` : '';
     const ehTesouro = /tesouro|selic|ipca|prefixad|renda\+|educa\+/i.test(q);
     const bolsaHtml = grupo('Encontrados', locais) + grupo('Mais resultados na B3', extra) + usarCodigo;
-    const rfHtml = grupoRF(q);
-    lista.innerHTML = (locais.length || extra.length || usarCodigo || achados.length || rfHtml)
-      ? (ehTesouro ? tesHtml + bolsaHtml : rfHtml && !locais.length ? rfHtml + bolsaHtml + tesHtml : bolsaHtml + tesHtml + rfHtml) + (N.nuvem.servidor && q.length >= 2 && ultimaQ !== q && !ehTesouro ? '<p class="dica pk-buscando">Procurando mais na B3…</p>' : '')
+    lista.innerHTML = (locais.length || extra.length || usarCodigo || achados.length)
+      ? (ehTesouro ? tesHtml + bolsaHtml : bolsaHtml + tesHtml) + (N.nuvem.servidor && q.length >= 2 && ultimaQ !== q && !ehTesouro ? '<p class="dica pk-buscando">Procurando mais na B3…</p>' : '')
       : carregandoTitulos() || (N.nuvem.servidor && ultimaQ !== q ? '<p class="dica pk-buscando">Procurando na B3…</p>' : `<p class="dica">Nada encontrado. Tente outro nome ou o código (ex.: TAEE11${opts.titulos ? ', Tesouro IPCA+ 2035' : ''}).</p>`);
   };
   const buscar = () => {
@@ -2157,7 +2149,7 @@ function abrirEscolherAtivo(aoEscolher, opts = {}) {
     clearTimeout(buscaT);
     remotos = [];
     pintar();
-    if (!N.nuvem.servidor || q.length < 2) { ultimaQ = q; return; }
+    if (!N.nuvem.servidor || q.length < 2 || opts.soTitulos) { ultimaQ = q; return; }
     buscaT = setTimeout(async () => {
       try {
         const r = await apiSim(`sim/busca?q=${encodeURIComponent(q)}`);
@@ -2172,7 +2164,7 @@ function abrirEscolherAtivo(aoEscolher, opts = {}) {
   lista.addEventListener('click', (e) => {
     const b = e.target.closest('[data-pick]');
     if (!b) return;
-    aoEscolher({ ticker: b.dataset.pick, nome: b.dataset.nome || nomeDoAtivo(b.dataset.pick), classe: b.dataset.classe, titulo: b.dataset.titulo || null, rf: b.dataset.rf || null });
+    aoEscolher({ ticker: b.dataset.pick, nome: b.dataset.nome || nomeDoAtivo(b.dataset.pick), classe: b.dataset.classe, titulo: b.dataset.titulo || null });
     dlg.close('ok');
   });
   pintar();
@@ -2210,6 +2202,7 @@ function htmlHeroiSim(r, c, i) {
       <span><i class="sw ${v >= 0 ? 'sh-sw-val' : 'sh-sw-perda'}"></i>${r.linhas.every((l) => l.tipo !== 'bolsa') ? 'Rendimento' : 'Valorização'}<b class="num ${clsV(v)}">${sinalR(v)}</b></span>
       ${r.linhas.some((l) => l.tipo === 'bolsa') ? `<span><i class="sw sh-sw-prov"></i>Proventos<b class="num ${prov ? 'var-alta' : ''}">${prov ? `+ ${R(prov)}` : '—'}</b></span>` : ''}
     </div>
+    ${r.caixa > 0.005 || r.aReceberTotal > 0.005 ? `<small class="sh-onde">${[r.caixa > 0.005 ? `<b>${R(r.caixa)}</b> de sobra em caixa` : '', r.aReceberTotal > 0.005 ? `<b>${R(r.aReceberTotal)}</b> de proventos a receber` : ''].filter(Boolean).join(' · ')}</small>` : ''}
   </div>`;
 }
 
@@ -2874,7 +2867,7 @@ function ligarSimular() {
     }
     if (t.dataset.aporte != null) { SIM.carteiras[t.dataset.aporte].aporte = num(t.value) || 0; salvarSim(); return; }
     const row = t.closest('.sim-item');
-    if (!row) return;
+    if (!row || t.dataset.campo === 'tipo') return;
     const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
     if (t.dataset.campo === 'taxa') it.taxa = num(t.value);
     if (t.dataset.campo === 'peso') { it.peso = num(t.value) || 0; atualizaSoma(row.dataset.c); }
@@ -2884,6 +2877,16 @@ function ligarSimular() {
     const t = e.target;
     if (t.id === 'sim-de' || t.id === 'sim-ate') { if (t.value) guardarData(t.id, t.value); return; }
     if (t.dataset.dia != null) { SIM.carteiras[t.dataset.dia].dia = t.value; salvarSim(); return; }
+    if (t.dataset.campo === 'tipo') {
+      const row = t.closest('.sim-item');
+      const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
+      for (const k of ['ticker', 'classe', 'titulo', 'nome', 'taxa']) delete it[k];
+      it.tipo = t.value;
+      if (TIPOS_SIM[it.tipo].taxa) it.taxa = TIPOS_SIM[it.tipo].taxa.padrao;
+      salvarSim(); redesenharCarteira(row.dataset.c);
+      if (it.tipo === 'bolsa' || it.tipo === 'titulo') raiz.querySelector(`[data-carteira="${row.dataset.c}"] .sim-item[data-i="${row.dataset.i}"] [data-escolher]`)?.click();
+      return;
+    }
   });
   raiz.addEventListener('click', (e) => {
     const cardAp = e.target.closest('[data-edit-aporte]');
@@ -2895,13 +2898,13 @@ function ligarSimular() {
     if (t.hasAttribute('data-escolher')) {
       const row = t.closest('.sim-item');
       const it = SIM.carteiras[row.dataset.c].itens[row.dataset.i];
+      const tesouro = it.tipo === 'titulo';
       abrirEscolherAtivo((a) => {
         for (const k of ['ticker', 'classe', 'titulo', 'nome', 'taxa']) delete it[k];
-        if (a.rf) Object.assign(it, { tipo: a.rf, taxa: TIPOS_SIM[a.rf].taxa.padrao });
-        else if (a.titulo) Object.assign(it, { tipo: 'titulo', titulo: a.titulo, nome: a.nome });
+        if (a.titulo) Object.assign(it, { tipo: 'titulo', titulo: a.titulo, nome: a.nome });
         else Object.assign(it, { tipo: 'bolsa', ticker: a.ticker, nome: a.nome, classe: a.classe });
         salvarSim(); redesenharCarteira(row.dataset.c);
-      }, { titulos: true, rendaFixa: true, tesouroPrimeiro: it.tipo === 'titulo' });
+      }, tesouro ? { titulos: true, soTitulos: true, comDesde: true } : {});
       return;
     }
     if (t.hasAttribute('data-novo-aporte')) { abrirEditarAporteSim(null); return; }

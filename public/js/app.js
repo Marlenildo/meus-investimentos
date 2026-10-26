@@ -14,7 +14,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.14.1';
+export const VERSAO = '1.14.2';
 const VERSAO_DATA = '2026-10-26';
 
 let S = carregar();
@@ -1192,7 +1192,7 @@ function htmlGrafico(largura) {
     <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(l.chave, per)}</b>${pilha.length && inv(l) ? `<span>Investido <b>${R(inv(l))}</b>${comTaxa && l.taxa > 0 ? ` <span class="apagado">(taxas ${R(l.taxa)})</span>` : ''}${merc[sel] != null ? ` · Valia <b>${R(merc[sel])}</b> <span class="${merc[sel] >= inv(l) ? 'var-alta' : 'var-baixa'}">${merc[sel] >= inv(l) ? '+' : '−'}${R(Math.abs(merc[sel] - inv(l)))} (${pct(inv(l) ? merc[sel] / inv(l) - 1 : null)})</span>` : ''}</span>` : ''}</div>
     ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, cls]) => `<span><i class="sw ${cls}"></i>${nome}<b>${R(v)}</b></span>`).join('')}${comProv && l.proventos && !simples ? `<span class="det-soma">Proventos<b>${R(l.proventos)}</b></span>` : ''}</div>${comProv && l.proventos ? `<div class="det-classe">${porClasse(l.pvc)}</div>` : ''}` : inv(l) ? '' : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}` : '');
 
-  const pa = G.porAtivo && n ? graficoPorAtivo({ chaves: linhas.map((x) => x.chave), per, acum, pilha, comProv, comTaxa, simples, merc: empilhaTudo && !simples ? mercPorTipo : null, L, sel }) : null;
+  const pa = G.porAtivo && n ? graficoPorAtivo({ chaves: linhas.map((x) => x.chave), per, acum, pilha, comProv, comTaxa, simples, merc: empilhaTudo ? mercPorTipo : null, L, sel }) : null;
 
   return `
     <section class="bloco grafico-bloco" id="graf-hist">
@@ -1233,7 +1233,7 @@ function htmlGrafico(largura) {
           <pattern id="hach-perda" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hach-fundo-baixa" width="6" height="6"/><line class="hach-linha-baixa" x1="0" y1="0" x2="0" y2="6"/></pattern>
         </defs>
         ${pa ? pa.svg : `${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}${linhaMerc}`}</svg></div>
-      ${empilhaTudo && !simples ? `<div class="graf-legenda"><span><i class="sw s-valoriz"></i>valorização</span><span><i class="sw s-perda-sw"></i>desvalorização</span>${comProv ? '<span><i class="sw pv-dividendo"></i>proventos (barra ao lado)</span>' : ''}</div>` : ''}
+      ${pa ? pa.legenda : empilhaTudo && !simples ? `<div class="graf-legenda"><span><i class="sw s-valoriz"></i>valorização</span><span><i class="sw s-perda-sw"></i>desvalorização</span>${comProv ? '<span><i class="sw pv-dividendo"></i>proventos (barra ao lado)</span>' : ''}</div>` : ''}
       <div class="graf-detalhe">${pa ? pa.detalhe : detalhe}</div>` : '<p class="dica">Ainda não há compras nem proventos para mostrar.</p>'}
     </section>`;
 }
@@ -1261,7 +1261,9 @@ function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, 
       if (!acum) for (const x in pv) delete pv[x];
       if (comProv) for (const [x, v] of Object.entries(l?.pv || {})) pv[x] = (pv[x] || 0) + v;
       if (acum) { ai += inv; ap += prov; inv = ai; prov = ap; }
-      return { inv, prov, pv: { ...pv }, vale: merc?.[i] && pilha.includes(classeDo(t)) ? merc[i].tk[t] || 0 : null };
+      // quanto valia: vira a linha do ativo; no detalhado, também a valorização em cima da barra
+      const m = merc?.[i] && pilha.includes(classeDo(t)) ? merc[i].tk[t] || 0 : null;
+      return { inv, prov, pv: { ...pv }, merc: m, vale: simples ? null : m };
     });
     return { t, cls: `s-${classeDo(t)}`, nome: t.replace(/^Tesouro /, ''), pts };
   });
@@ -1280,7 +1282,7 @@ function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, 
   const folga = soma < L ? (L - soma) / Math.max(n, 1) : 0;
   const larg = natural.map((v) => v + folga);
   const W = Math.round(larg.reduce((s, v) => s + v, 0));
-  const maxV = Math.max(1, ...series.flatMap((s) => s.pts.map((p) => Math.max(p.inv, p.prov, p.vale || 0))));
+  const maxV = Math.max(1, ...series.flatMap((s) => s.pts.map((p) => Math.max(p.inv, p.prov, p.merc || 0))));
   const y = (v) => topo + alt * (1 - Math.max(0, v) / maxV);
   const curto = (v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : Math.round(v).toLocaleString('pt-BR'));
 
@@ -1320,6 +1322,7 @@ function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, 
       corpo += (valor > 0.005 ? `<text class="v2" x="${cx}" y="${yTopo - (p.prov > 0.005 ? 15 : 5)}" text-anchor="middle">${curto(valor)}</text>` : '')
         + (p.prov > 0.005 ? `<text class="v2 prov-tk" x="${cx}" y="${yTopo - 4}" text-anchor="middle">${comInv ? '+' : ''}${curto(p.prov)}</text>` : '')
         + `<text class="tk" x="${cx}" y="${H - 28}" text-anchor="middle">${esc(s.nome)}</text>`;
+      if (p.merc != null) (s.linha ||= []).push([xInv + wInv / 2, y(p.merc), i]);
       x += lw;
     });
     const out = `<g class="slot ${i === sel ? 'sel' : ''}" data-graf-slot="${i}">
@@ -1331,12 +1334,17 @@ function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, 
     return out;
   }).join('');
   const grade = [0.25, 0.5, 0.75, 1].map((f) => `<line class="grade" x1="0" x2="${W}" y1="${topo + alt * (1 - f)}" y2="${topo + alt * (1 - f)}"/>`).join('');
-  const svg = `${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${slots}`;
+  // uma linha por ativo, na cor da classe, passando pelo valor de mercado em cada período
+  const COR = { 's-acao': 'var(--s-acao)', 's-fii': 'var(--s-fii)', 's-outros': 'var(--s-outros)', 's-tesouro': 'var(--s-tes)', 's-rf': '#6b7a90' };
+  const linhas = series.filter((s) => s.linha?.length).map((s) => `<g class="linha-tk" style="--cor:${COR[s.cls] || 'var(--tinta)'}">${s.linha.length > 1 ? `<polyline points="${s.linha.map(([px, py]) => `${px},${py}`).join(' ')}"/>` : ''}${s.linha.map(([px, py, i]) => `<circle cx="${px}" cy="${py}" r="${i === sel ? 4 : 2.75}"/>`).join('')}</g>`).join('');
+  const svg = `${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${slots}${linhas}`;
+  const comLinha = series.some((s) => s.linha?.length);
+  const legenda = comLinha ? `<div class="graf-legenda"><span><i class="sw s-mercado"></i>valor de mercado de cada ativo (linha na cor da classe)</span>${simples ? '' : '<span><i class="sw s-valoriz"></i>valorização</span><span><i class="sw s-perda-sw"></i>desvalorização</span>'}${comProv ? '<span><i class="sw pv-dividendo"></i>proventos (barra ao lado)</span>' : ''}</div>` : '';
 
   // embaixo: cada ativo do período escolhido, do maior para o menor
   const tamanho = (s) => Math.max(s.pts[sel].inv, s.pts[sel].vale || 0);
   const lista = [...(grupos[sel] || [])].sort((a, b) => tamanho(b) - tamanho(a));
-  const comVale = lista.some((s) => s.pts[sel].vale != null);
+  const comVale = lista.some((s) => s.pts[sel].merc != null);
   const tot = lista.reduce((s, x) => ({ inv: s.inv + x.pts[sel].inv, prov: s.prov + x.pts[sel].prov }), { inv: 0, prov: 0 });
   const detalhe = `
     <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(chaves[sel], per)}</b><span>${[comInv ? `Investido <b>${R(tot.inv)}</b>` : '', comProv ? `Proventos <b>${R(tot.prov)}</b>` : ''].filter(Boolean).join(' · ')}</span></div>
@@ -1345,11 +1353,11 @@ function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, 
       ${lista.map((s) => {
         const p = s.pts[sel];
         return `<span class="det-ativo-nome"><i class="sw ${s.cls}"></i>${esc(s.t)}</span>${comInv ? `<b class="num ${Math.abs(p.inv) > 0.005 ? '' : 'apagado'}">${Math.abs(p.inv) > 0.005 ? R(p.inv) : '—'}</b>` : ''}`
-          + (comVale ? `<span class="num">${p.vale != null ? `<b>${R(p.vale)}</b> <small class="${p.vale >= p.inv ? 'var-alta' : 'var-baixa'}">${pct(p.inv > 0 ? p.vale / p.inv - 1 : null)}</small>` : '—'}</span>` : '')
+          + (comVale ? `<span class="num">${p.merc != null ? `<b>${R(p.merc)}</b> <small class="${p.merc >= p.inv ? 'var-alta' : 'var-baixa'}">${pct(p.inv > 0 ? p.merc / p.inv - 1 : null)}</small>` : '—'}</span>` : '')
           + (comProv ? `<b class="num ${p.prov > 0.005 ? 'var-alta' : 'apagado'}">${p.prov > 0.005 ? R(p.prov) : '—'}</b>` : '');
       }).join('')}
     </div>` : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}`;
-  return { W, H, svg, detalhe };
+  return { W, H, svg, detalhe, legenda };
 }
 
 function redesenharGrafico({ fim = false } = {}) {

@@ -1255,3 +1255,5 @@ table.resp .rv { display: block; }
 .sim-seg-cart { flex-wrap: wrap; border-radius: 18px; max-width: 100%; }
 .sim-seg-cart button { white-space: nowrap; height: auto; min-height: 30px; padding: 4px 12px; max-width: 100%; }
 .sim-tag > i.sim-ab { width: auto; padding: 0 5px; background: linear-gradient(90deg, var(--s-acao), var(--s-tes)); }
+.grafico .linha-tk polyline { fill: none; stroke: var(--cor); stroke-width: 1.75px; stroke-linejoin: round; stroke-linecap: round; opacity: 0.9; pointer-events: none; }
+.grafico .linha-tk circle { fill: var(--folha); stroke: var(--cor); stroke-width: 2px; pointer-events: none; }

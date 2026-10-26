@@ -14,7 +14,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.14.0';
+export const VERSAO = '1.14.1';
 const VERSAO_DATA = '2026-10-26';
 
 let S = carregar();
@@ -1247,7 +1247,7 @@ function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, 
   const classe = classesPorTicker(d.compras);
   const classeDo = (t) => classe.get(t) || classeDe(S.ativos.find((a) => a.ticker === t)?.tipo);
   const tickers = [...new Set([...d.compras.map((c) => c.ticker), ...d.proventos.map((p) => p.ticker)])]
-    .filter((t) => t && pilha.includes(classeDo(t)))
+    .filter((t) => t && (comProv || pilha.includes(classeDo(t)))) // com os proventos ligados, todo ativo aparece (como no gráfico junto)
     .sort((a, b) => a.localeCompare(b));
   // cada ativo período a período: investido, proventos (por tipo) e, no acumulado, quanto valia
   const series = tickers.map((t) => {
@@ -1256,19 +1256,21 @@ function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, 
     const pv = {};
     const pts = chaves.map((k, i) => {
       const l = ls.get(k);
-      let inv = l ? PILHA.reduce((s, c) => s + l[c] - (comTaxa ? 0 : l.tx?.[c] || 0), 0) : 0;
+      let inv = l && pilha.includes(classeDo(t)) ? PILHA.reduce((s, c) => s + l[c] - (comTaxa ? 0 : l.tx?.[c] || 0), 0) : 0;
       let prov = comProv ? l?.proventos || 0 : 0;
       if (!acum) for (const x in pv) delete pv[x];
       if (comProv) for (const [x, v] of Object.entries(l?.pv || {})) pv[x] = (pv[x] || 0) + v;
       if (acum) { ai += inv; ap += prov; inv = ai; prov = ap; }
-      return { inv, prov, pv: { ...pv }, vale: merc?.[i] ? merc[i].tk[t] || 0 : null };
+      return { inv, prov, pv: { ...pv }, vale: merc?.[i] && pilha.includes(classeDo(t)) ? merc[i].tk[t] || 0 : null };
     });
     return { t, cls: `s-${classeDo(t)}`, nome: t.replace(/^Tesouro /, ''), pts };
   });
 
   const n = chaves.length;
   const H = 300, topo = 40, base = 44, alt = H - topo - base;
-  const wInv = 20, wProv = comProv ? 9 : 0, entre = comProv ? 2 : 0;
+  // só proventos (classes desligadas): a barra deles fica sozinha e mais larga
+  const comInv = pilha.length > 0;
+  const wInv = comInv ? 20 : 0, wProv = comProv ? (comInv ? 9 : 20) : 0, entre = comInv && comProv ? 2 : 0;
   const larguraDe = (s) => Math.max(wInv + entre + wProv + 14, s.nome.length * 6.2 + 8);
   const tem = (p) => Math.abs(p.inv) > 0.005 || p.prov > 0.005 || (p.vale || 0) > 0.005;
   // períodos sem nada ficam estreitos; o que sobra da tela é dividido entre todos
@@ -1316,7 +1318,7 @@ function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, 
       const cx = x + lw / 2;
       const valor = p.vale != null ? p.vale : inv;
       corpo += (valor > 0.005 ? `<text class="v2" x="${cx}" y="${yTopo - (p.prov > 0.005 ? 15 : 5)}" text-anchor="middle">${curto(valor)}</text>` : '')
-        + (p.prov > 0.005 ? `<text class="v2 prov-tk" x="${cx}" y="${yTopo - 4}" text-anchor="middle">+${curto(p.prov)}</text>` : '')
+        + (p.prov > 0.005 ? `<text class="v2 prov-tk" x="${cx}" y="${yTopo - 4}" text-anchor="middle">${comInv ? '+' : ''}${curto(p.prov)}</text>` : '')
         + `<text class="tk" x="${cx}" y="${H - 28}" text-anchor="middle">${esc(s.nome)}</text>`;
       x += lw;
     });
@@ -1337,12 +1339,12 @@ function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, 
   const comVale = lista.some((s) => s.pts[sel].vale != null);
   const tot = lista.reduce((s, x) => ({ inv: s.inv + x.pts[sel].inv, prov: s.prov + x.pts[sel].prov }), { inv: 0, prov: 0 });
   const detalhe = `
-    <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(chaves[sel], per)}</b><span>Investido <b>${R(tot.inv)}</b>${comProv ? ` · Proventos <b>${R(tot.prov)}</b>` : ''}</span></div>
-    ${lista.length ? `<div class="det-ativos${comVale ? ' com-vale' : ''}${comProv ? ' com-prov' : ''}">
-      <span class="det-ativos-cab">Ativo</span><span class="det-ativos-cab">Investido</span>${comVale ? '<span class="det-ativos-cab">Valia</span>' : ''}${comProv ? '<span class="det-ativos-cab">Proventos</span>' : ''}
+    <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(chaves[sel], per)}</b><span>${[comInv ? `Investido <b>${R(tot.inv)}</b>` : '', comProv ? `Proventos <b>${R(tot.prov)}</b>` : ''].filter(Boolean).join(' · ')}</span></div>
+    ${lista.length ? `<div class="det-ativos" style="--cols:${[comInv, comVale, comProv].filter(Boolean).length}">
+      <span class="det-ativos-cab">Ativo</span>${comInv ? '<span class="det-ativos-cab">Investido</span>' : ''}${comVale ? '<span class="det-ativos-cab">Valia</span>' : ''}${comProv ? '<span class="det-ativos-cab">Proventos</span>' : ''}
       ${lista.map((s) => {
         const p = s.pts[sel];
-        return `<span class="det-ativo-nome"><i class="sw ${s.cls}"></i>${esc(s.t)}</span><b class="num ${Math.abs(p.inv) > 0.005 ? '' : 'apagado'}">${Math.abs(p.inv) > 0.005 ? R(p.inv) : '—'}</b>`
+        return `<span class="det-ativo-nome"><i class="sw ${s.cls}"></i>${esc(s.t)}</span>${comInv ? `<b class="num ${Math.abs(p.inv) > 0.005 ? '' : 'apagado'}">${Math.abs(p.inv) > 0.005 ? R(p.inv) : '—'}</b>` : ''}`
           + (comVale ? `<span class="num">${p.vale != null ? `<b>${R(p.vale)}</b> <small class="${p.vale >= p.inv ? 'var-alta' : 'var-baixa'}">${pct(p.inv > 0 ? p.vale / p.inv - 1 : null)}</small>` : '—'}</span>` : '')
           + (comProv ? `<b class="num ${p.prov > 0.005 ? 'var-alta' : 'apagado'}">${p.prov > 0.005 ? R(p.prov) : '—'}</b>` : '');
       }).join('')}

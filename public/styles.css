@@ -733,8 +733,6 @@ html, body { overflow-x: clip; }
 .grafico .slot.sel text.tk { fill: var(--tinta); }
 .grafico text.v2.prov-tk { fill: var(--pv-div); font-size: 9px; font-weight: 600; }
 .det-ativos { display: grid; grid-template-columns: minmax(90px, auto) repeat(var(--cols, 1), auto); gap: 6px 18px; margin-top: 10px; font-size: 0.86rem; color: var(--tinta-2); align-items: center; justify-content: start; }
-.det-ativos.com-prov, .det-ativos.com-vale { --cols: 2; }
-.det-ativos.com-prov.com-vale { --cols: 3; }
 .det-ativos .num { text-align: right; font-variant-numeric: tabular-nums; }
 .det-ativos b { color: var(--tinta); font-weight: 600; }
 .det-ativos b.var-alta { color: var(--alta); }

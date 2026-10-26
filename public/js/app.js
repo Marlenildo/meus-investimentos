@@ -14,8 +14,8 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.13.4';
-const VERSAO_DATA = '2026-10-23';
+export const VERSAO = '1.14.0';
+const VERSAO_DATA = '2026-10-26';
 
 let S = carregar();
 const statusCotacao = {}; // ativoId -> {erro?, variacao?}
@@ -804,6 +804,8 @@ if (typeof G.sel !== 'number') G.sel = null;
 if (!G.hist.includes('mercado') && !G.semMercado) G.hist.push('mercado');
 if (!G.hist.includes('taxa') && !G.semTaxa) G.hist.push('taxa');
 if (!G.rfVisto) { if (!G.hist.includes('rf')) G.hist.push('rf'); G.rfVisto = true; } // renda fixa chegou depois: aparece ligada
+if (!Array.isArray(G.ativos)) G.ativos = G.ativo ? [G.ativo] : []; // antes era um ativo só
+delete G.ativo;
 const salvarG = () => { try { localStorage.setItem(GRAF_KEY, JSON.stringify(G)); } catch { /* sem armazenamento */ } };
 
 const rotuloCurto = (chave, per) => per === 'ano' ? chave : per === 'mes' ? mesCurto(chave) : `${chave.slice(8, 10)}/${chave.slice(5, 7)}`;
@@ -827,11 +829,13 @@ function dadosDoBanco() {
 }
 function dadosDoFiltro() {
   const d = dadosDoBanco();
-  if (G.ativo && !d.compras.some((c) => c.ticker === G.ativo) && !d.proventos.some((p) => p.ticker === G.ativo)) G.ativo = '';
-  const t = G.ativo;
-  if (!t) return d;
-  return { compras: d.compras.filter((c) => c.ticker === t), proventos: d.proventos.filter((p) => p.ticker === t) };
+  G.ativos = G.ativos.filter((t) => d.compras.some((c) => c.ticker === t) || d.proventos.some((p) => p.ticker === t));
+  if (!G.ativos.length) return d;
+  const t = new Set(G.ativos);
+  return { compras: d.compras.filter((c) => t.has(c.ticker)), proventos: d.proventos.filter((p) => t.has(p.ticker)) };
 }
+/** Os ativos escolhidos no filtro, para o título: "· BBAS3, PETR4" ou "· 3 ativos". */
+const tituloAtivos = () => (!G.ativos.length ? '' : ` <span class="graf-ativo-nome">· ${esc(G.ativos.length <= 2 ? G.ativos.join(', ') : `${G.ativos.length} ativos`)}</span>`);
 /** Ativos que aparecem no filtro: os que você tem ou já teve, e os que pagaram proventos. */
 function ativosDoFiltro() {
   const d = dadosDoBanco();
@@ -910,12 +914,13 @@ function mercadoAte(ym) {
     pos.set(c.ticker, p);
   }
   for (const [t, p] of pos) if (p.qtd <= 1e-9) pos.delete(t);
-  const porTipo = { acao: 0, fii: 0, outros: 0, tesouro: 0, rf: 0, tes: {} };
+  const porTipo = { acao: 0, fii: 0, outros: 0, tesouro: 0, rf: 0, tes: {}, tk: {} };
   for (const [t, p] of pos) {
     const grupo = classeDe(p.tipo);
     const preco = precoNoMes(t, p.tipo, ym);
     const v = preco ? p.qtd * preco : p.custo;
     porTipo[grupo] += v;
+    porTipo.tk[t] = v; // cada ativo em separado, para o gráfico por ativo
     if (grupo === 'tesouro') porTipo.tes[t] = (porTipo.tes[t] || 0) + v;
   }
   return porTipo;
@@ -1141,7 +1146,7 @@ function htmlGrafico(largura) {
     const linhaVal = valoriz != null ? `<div class="conta-l"><span>Valorização<small>${hoje ? 'pelo preço das cotas hoje' : `pelo preço no fim de ${rotuloCurto(l.chave, per)}`}</small></span><b class="num ${valoriz >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(valoriz)}</b></div>` : '';
     const linhaCarteira = valoriz != null ? `<div class="conta-l conta-total"><span>Valor da carteira</span><b class="num">${R(mercS)}</b></div>` : '<div class="conta-l conta-total"><span>Valor da carteira<small>sem preços para calcular</small></span><b class="num">—</b></div>';
     const linhaGanho = (sm) => `<div class="conta-ret"><span>Ganho total<small>${sm}</small></span><b class="${ganho >= 0 ? 'var-alta' : 'var-baixa'}">${sinal(ganho)} · ${pct(bolso ? ganho / bolso : null)}</b></div>`;
-    const cab = `<div class="conta-cab"><b>Até ${rotuloLongo(l.chave, per).replace(/^Até /, '')}</b>${G.ativo ? `<span class="apagado">${esc(G.ativo)}</span>` : ''}</div>`;
+    const cab = `<div class="conta-cab"><b>Até ${rotuloLongo(l.chave, per).replace(/^Até /, '')}</b>${G.ativos.length ? `<span class="apagado">${esc(G.ativos.join(', '))}</span>` : ''}</div>`;
 
     if (simples) {
       // só o essencial: bolso, o que veio de graça, valorização e o resultado
@@ -1187,11 +1192,13 @@ function htmlGrafico(largura) {
     <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(l.chave, per)}</b>${pilha.length && inv(l) ? `<span>Investido <b>${R(inv(l))}</b>${comTaxa && l.taxa > 0 ? ` <span class="apagado">(taxas ${R(l.taxa)})</span>` : ''}${merc[sel] != null ? ` · Valia <b>${R(merc[sel])}</b> <span class="${merc[sel] >= inv(l) ? 'var-alta' : 'var-baixa'}">${merc[sel] >= inv(l) ? '+' : '−'}${R(Math.abs(merc[sel] - inv(l)))} (${pct(inv(l) ? merc[sel] / inv(l) - 1 : null)})</span>` : ''}</span>` : ''}</div>
     ${itens.length ? `<div class="det-itens">${itens.map(([nome, v, cls]) => `<span><i class="sw ${cls}"></i>${nome}<b>${R(v)}</b></span>`).join('')}${comProv && l.proventos && !simples ? `<span class="det-soma">Proventos<b>${R(l.proventos)}</b></span>` : ''}</div>${comProv && l.proventos ? `<div class="det-classe">${porClasse(l.pvc)}</div>` : ''}` : inv(l) ? '' : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}` : '');
 
+  const pa = G.porAtivo && n ? graficoPorAtivo({ chaves: linhas.map((x) => x.chave), per, acum, pilha, comProv, comTaxa, simples, merc: empilhaTudo && !simples ? mercPorTipo : null, L, sel }) : null;
+
   return `
     <section class="bloco grafico-bloco" id="graf-hist">
       <div class="graf-topo">
         <div>
-          <h2>${acum ? 'Total acumulado' : 'Quanto investi'}${tituloBanco()}${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
+          <h2>${acum ? 'Total acumulado' : 'Quanto investi'}${tituloBanco()}${tituloAtivos()}</h2>
           <small class="sub-cab">${subCab}</small>
         </div>
         <div class="graf-controles">
@@ -1199,10 +1206,13 @@ function htmlGrafico(largura) {
             <option value="">Todos os bancos</option>
             ${bancosUsados().map((b) => `<option value="${esc(b.id)}" data-icone="${esc(logoBanco(b.id, b.nome))}" ${b.id === G.banco ? 'selected' : ''}>${esc(b.nome)}</option>`).join('')}
           </select>` : ''}
-          <select id="graf-ativo" class="peq" aria-label="Ativo">
+          <select id="graf-ativo" class="peq" aria-label="Ativos" multiple data-multi="ativos">
             <option value="">Todos os ativos</option>
-            ${ativosDoFiltro().map((t) => `<option ${t === G.ativo ? 'selected' : ''}>${esc(t)}</option>`).join('')}
+            ${ativosDoFiltro().map((t) => `<option ${G.ativos.includes(t) ? 'selected' : ''}>${esc(t)}</option>`).join('')}
           </select>
+          <div class="seg" role="group" aria-label="Agrupar ativos">
+            ${[['junto', 'Junto'], ['ativo', 'Por ativo']].map(([k, nm]) => `<button type="button" data-graf-agrupa="${k}" aria-pressed="${(G.porAtivo ? 'ativo' : 'junto') === k}">${nm}</button>`).join('')}
+          </div>
           <div class="seg" role="group" aria-label="Visão">
             ${[['simples', 'Simples'], ['detalhado', 'Detalhado']].map(([k, nm]) => `<button type="button" data-graf-vista="${k}" aria-pressed="${vista === k}">${nm}</button>`).join('')}
           </div>
@@ -1217,15 +1227,127 @@ function htmlGrafico(largura) {
       <div class="filtros" role="group" aria-label="Mostrar no gráfico">
         ${presentes.map((x) => `<button type="button" class="filtro" data-graf-serie="${x.k}" aria-pressed="${ativos.has(x.k)}"><i class="sw s-${x.k}${simples && x.k === 'mercado' ? ' linha' : ''}"></i>${simples && x.k === 'mercado' ? 'Valor de mercado' : x.nome}</button>`).join('')}
       </div>
-      ${n ? `<div class="graf-rolagem" data-largura="${L}"><svg class="grafico" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Investimentos${comProv ? ' e proventos' : ''} por ${per === 'mes' ? 'mês' : per}${acum ? ', acumulado' : ''}">
+      ${n ? `<div class="graf-rolagem" data-largura="${L}"><svg class="grafico" width="${pa ? pa.W : W}" height="${pa ? pa.H : H}" viewBox="0 0 ${pa ? pa.W : W} ${pa ? pa.H : H}" role="img" aria-label="Investimentos${comProv ? ' e proventos' : ''}${pa ? ' de cada ativo' : ''} por ${per === 'mes' ? 'mês' : per}${acum ? ', acumulado' : ''}">
         <defs>
           <pattern id="hach-valoriz" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hach-fundo-alta" width="6" height="6"/><line class="hach-linha-alta" x1="0" y1="0" x2="0" y2="6"/></pattern>
           <pattern id="hach-perda" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hach-fundo-baixa" width="6" height="6"/><line class="hach-linha-baixa" x1="0" y1="0" x2="0" y2="6"/></pattern>
         </defs>
-        ${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}${linhaMerc}</svg></div>
+        ${pa ? pa.svg : `${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${barras}${linhaMerc}`}</svg></div>
       ${empilhaTudo && !simples ? `<div class="graf-legenda"><span><i class="sw s-valoriz"></i>valorização</span><span><i class="sw s-perda-sw"></i>desvalorização</span>${comProv ? '<span><i class="sw pv-dividendo"></i>proventos (barra ao lado)</span>' : ''}</div>` : ''}
-      <div class="graf-detalhe">${detalhe}</div>` : '<p class="dica">Ainda não há compras nem proventos para mostrar.</p>'}
+      <div class="graf-detalhe">${pa ? pa.detalhe : detalhe}</div>` : '<p class="dica">Ainda não há compras nem proventos para mostrar.</p>'}
     </section>`;
+}
+
+/**
+ * O mesmo gráfico com cada ativo em separado: em cada período, um par de barras por ativo
+ * (o investido, na cor da classe, e os proventos ao lado), com o nome do ativo embaixo.
+ */
+function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, merc, L, sel }) {
+  const d = dadosDoFiltro();
+  const classe = classesPorTicker(d.compras);
+  const classeDo = (t) => classe.get(t) || classeDe(S.ativos.find((a) => a.ticker === t)?.tipo);
+  const tickers = [...new Set([...d.compras.map((c) => c.ticker), ...d.proventos.map((p) => p.ticker)])]
+    .filter((t) => t && pilha.includes(classeDo(t)))
+    .sort((a, b) => a.localeCompare(b));
+  // cada ativo período a período: investido, proventos (por tipo) e, no acumulado, quanto valia
+  const series = tickers.map((t) => {
+    const ls = new Map(resumoPorPeriodo(d.compras.filter((c) => c.ticker === t), d.proventos.filter((p) => p.ticker === t), per).map((l) => [l.chave, l]));
+    let ai = 0, ap = 0;
+    const pv = {};
+    const pts = chaves.map((k, i) => {
+      const l = ls.get(k);
+      let inv = l ? PILHA.reduce((s, c) => s + l[c] - (comTaxa ? 0 : l.tx?.[c] || 0), 0) : 0;
+      let prov = comProv ? l?.proventos || 0 : 0;
+      if (!acum) for (const x in pv) delete pv[x];
+      if (comProv) for (const [x, v] of Object.entries(l?.pv || {})) pv[x] = (pv[x] || 0) + v;
+      if (acum) { ai += inv; ap += prov; inv = ai; prov = ap; }
+      return { inv, prov, pv: { ...pv }, vale: merc?.[i] ? merc[i].tk[t] || 0 : null };
+    });
+    return { t, cls: `s-${classeDo(t)}`, nome: t.replace(/^Tesouro /, ''), pts };
+  });
+
+  const n = chaves.length;
+  const H = 300, topo = 40, base = 44, alt = H - topo - base;
+  const wInv = 20, wProv = comProv ? 9 : 0, entre = comProv ? 2 : 0;
+  const larguraDe = (s) => Math.max(wInv + entre + wProv + 14, s.nome.length * 6.2 + 8);
+  const tem = (p) => Math.abs(p.inv) > 0.005 || p.prov > 0.005 || (p.vale || 0) > 0.005;
+  // períodos sem nada ficam estreitos; o que sobra da tela é dividido entre todos
+  const grupos = chaves.map((_, i) => series.filter((s) => tem(s.pts[i])));
+  const natural = grupos.map((g) => Math.max(per === 'ano' ? 64 : 52, g.reduce((s, x) => s + larguraDe(x), 0) + 16));
+  const soma = natural.reduce((s, v) => s + v, 0);
+  const folga = soma < L ? (L - soma) / Math.max(n, 1) : 0;
+  const larg = natural.map((v) => v + folga);
+  const W = Math.round(larg.reduce((s, v) => s + v, 0));
+  const maxV = Math.max(1, ...series.flatMap((s) => s.pts.map((p) => Math.max(p.inv, p.prov, p.vale || 0))));
+  const y = (v) => topo + alt * (1 - Math.max(0, v) / maxV);
+  const curto = (v) => (Math.abs(v) >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : Math.round(v).toLocaleString('pt-BR'));
+
+  let x0 = 0;
+  const slots = chaves.map((k, i) => {
+    const largura = larg[i];
+    const usado = grupos[i].reduce((s, x) => s + larguraDe(x), 0);
+    let x = x0 + (largura - usado) / 2;
+    let corpo = '';
+    grupos[i].forEach((s, j) => {
+      const p = s.pts[i];
+      const lw = larguraDe(s);
+      const xInv = x + (lw - (wInv + entre + wProv)) / 2;
+      const xProv = xInv + wInv + entre;
+      // investido (com a valorização ou a perda por cima, no acumulado detalhado)
+      const inv = Math.max(0, p.inv);
+      const cheio = p.vale != null ? Math.min(inv, p.vale) : inv;
+      let segs = `<rect class="seg ${s.cls}" x="${xInv}" y="${y(cheio)}" width="${wInv}" height="${Math.max(0.5, y(0) - y(cheio))}"/>`;
+      if (p.vale != null && p.vale - inv >= 1) segs += `<rect class="seg s-valoriz" x="${xInv}" y="${y(p.vale)}" width="${wInv}" height="${y(cheio) - y(p.vale)}"/>`;
+      else if (p.vale != null && p.vale - inv <= -1) segs += `<rect class="seg s-perda" x="${xInv}" y="${y(inv)}" width="${wInv}" height="${y(cheio) - y(inv)}"/>`;
+      const topoInv = y(Math.max(inv, p.vale || 0));
+      if (topoInv < y(0)) corpo += `<clipPath id="ca${i}-${j}"><rect x="${xInv}" y="${topoInv}" width="${wInv}" height="${y(0) - topoInv + 6}" rx="5"/></clipPath><g clip-path="url(#ca${i}-${j})">${segs}</g>`;
+      // proventos ao lado, por tipo
+      if (p.prov > 0.005) {
+        let ap = 0, prov = '';
+        const tipos = simples ? [['prov', p.prov]] : TIPOS_PROV_ORDEM.filter((t) => (p.pv[t] || 0) > 0).map((t) => [t, p.pv[t]]);
+        for (const [k2, v] of tipos) {
+          prov += `<rect class="seg ${k2 === 'prov' ? 's-prov' : `pv-${k2}`}" x="${xProv}" y="${y(ap + v)}" width="${wProv}" height="${Math.max(0.5, y(ap) - y(ap + v))}"/>`;
+          ap += v;
+        }
+        corpo += `<clipPath id="cq${i}-${j}"><rect x="${xProv}" y="${y(p.prov)}" width="${wProv}" height="${y(0) - y(p.prov) + 4}" rx="3"/></clipPath><g clip-path="url(#cq${i}-${j})">${prov}</g>`;
+      }
+      // valores em cima e o nome do ativo embaixo
+      const yTopo = Math.min(topoInv, y(p.prov));
+      const cx = x + lw / 2;
+      const valor = p.vale != null ? p.vale : inv;
+      corpo += (valor > 0.005 ? `<text class="v2" x="${cx}" y="${yTopo - (p.prov > 0.005 ? 15 : 5)}" text-anchor="middle">${curto(valor)}</text>` : '')
+        + (p.prov > 0.005 ? `<text class="v2 prov-tk" x="${cx}" y="${yTopo - 4}" text-anchor="middle">+${curto(p.prov)}</text>` : '')
+        + `<text class="tk" x="${cx}" y="${H - 28}" text-anchor="middle">${esc(s.nome)}</text>`;
+      x += lw;
+    });
+    const out = `<g class="slot ${i === sel ? 'sel' : ''}" data-graf-slot="${i}">
+      <rect class="alvo" x="${x0 + 3}" y="4" width="${largura - 6}" height="${H - 8}" rx="10"/>
+      ${corpo}
+      <text class="x" x="${x0 + largura / 2}" y="${H - 9}" text-anchor="middle">${rotuloCurto(k, per)}</text>
+    </g>`;
+    x0 += largura;
+    return out;
+  }).join('');
+  const grade = [0.25, 0.5, 0.75, 1].map((f) => `<line class="grade" x1="0" x2="${W}" y1="${topo + alt * (1 - f)}" y2="${topo + alt * (1 - f)}"/>`).join('');
+  const svg = `${grade}<line class="base" x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}"/>${slots}`;
+
+  // embaixo: cada ativo do período escolhido, do maior para o menor
+  const tamanho = (s) => Math.max(s.pts[sel].inv, s.pts[sel].vale || 0);
+  const lista = [...(grupos[sel] || [])].sort((a, b) => tamanho(b) - tamanho(a));
+  const comVale = lista.some((s) => s.pts[sel].vale != null);
+  const tot = lista.reduce((s, x) => ({ inv: s.inv + x.pts[sel].inv, prov: s.prov + x.pts[sel].prov }), { inv: 0, prov: 0 });
+  const detalhe = `
+    <div class="det-cab"><b>${acum ? 'Até ' : ''}${rotuloLongo(chaves[sel], per)}</b><span>Investido <b>${R(tot.inv)}</b>${comProv ? ` · Proventos <b>${R(tot.prov)}</b>` : ''}</span></div>
+    ${lista.length ? `<div class="det-ativos${comVale ? ' com-vale' : ''}${comProv ? ' com-prov' : ''}">
+      <span class="det-ativos-cab">Ativo</span><span class="det-ativos-cab">Investido</span>${comVale ? '<span class="det-ativos-cab">Valia</span>' : ''}${comProv ? '<span class="det-ativos-cab">Proventos</span>' : ''}
+      ${lista.map((s) => {
+        const p = s.pts[sel];
+        return `<span class="det-ativo-nome"><i class="sw ${s.cls}"></i>${esc(s.t)}</span><b class="num ${Math.abs(p.inv) > 0.005 ? '' : 'apagado'}">${Math.abs(p.inv) > 0.005 ? R(p.inv) : '—'}</b>`
+          + (comVale ? `<span class="num">${p.vale != null ? `<b>${R(p.vale)}</b> <small class="${p.vale >= p.inv ? 'var-alta' : 'var-baixa'}">${pct(p.inv > 0 ? p.vale / p.inv - 1 : null)}</small>` : '—'}</span>` : '')
+          + (comProv ? `<b class="num ${p.prov > 0.005 ? 'var-alta' : 'apagado'}">${p.prov > 0.005 ? R(p.prov) : '—'}</b>` : '');
+      }).join('')}
+    </div>` : '<div class="det-itens"><span class="apagado">Sem movimento neste período.</span></div>'}`;
+  return { W, H, svg, detalhe };
 }
 
 function redesenharGrafico({ fim = false } = {}) {
@@ -1245,7 +1367,7 @@ function ligarGrafico() {
   $('#conteudo').addEventListener('change', (e) => {
     if (e.target.id !== 'graf-ativo' && e.target.id !== 'graf-banco') return;
     if (e.target.id === 'graf-banco') G.banco = e.target.value;
-    else G.ativo = e.target.value;
+    else G.ativos = [...e.target.selectedOptions].map((o) => o.value).filter(Boolean);
     G.sel = null;
     salvarG();
     const y = scrollY;
@@ -1253,12 +1375,13 @@ function ligarGrafico() {
     scrollTo({ top: y });
   });
   $('#conteudo').addEventListener('click', (e) => {
-    const t = e.target.closest('[data-graf-periodo],[data-graf-serie],[data-graf-slot],[data-graf-modo],[data-graf-vista]');
+    const t = e.target.closest('[data-graf-periodo],[data-graf-serie],[data-graf-slot],[data-graf-modo],[data-graf-vista],[data-graf-agrupa]');
     if (!t) return;
     let fim = false;
     if (t.dataset.grafPeriodo) { G.periodo = t.dataset.grafPeriodo; G.sel = null; fim = true; }
     if (t.dataset.grafModo) { G.modo = t.dataset.grafModo; }
     if (t.dataset.grafVista) { G.vista = t.dataset.grafVista; }
+    if (t.dataset.grafAgrupa) { G.porAtivo = t.dataset.grafAgrupa === 'ativo'; }
     if (t.dataset.grafSerie) {
       const lista = new Set(G.hist);
       lista.has(t.dataset.grafSerie) ? lista.delete(t.dataset.grafSerie) : lista.add(t.dataset.grafSerie);
@@ -1578,7 +1701,7 @@ function renderCarteira() {
 
 
     <section class="bloco">
-      <div class="bloco-cab"><h2>Operações${tituloBanco()}${G.ativo ? ` <span class="graf-ativo-nome">· ${esc(G.ativo)}</span>` : ''}</h2>
+      <div class="bloco-cab"><h2>Operações${tituloBanco()}${tituloAtivos()}</h2>
         <div class="acoes"><button type="button" class="btn peq" data-nova-op="V">Registrar venda</button><button type="button" class="btn peq" data-nova-op="C">Compra antiga</button></div></div>
       ${[...porMes.entries()].map(([mes, xs], i) => `
         <details class="mes-grupo" ${i === 0 ? 'open' : ''}>

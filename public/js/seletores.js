@@ -101,6 +101,7 @@ function ligarRotulo(el, btn) {
 
 // ---------- <select> ----------
 function melhorarSelect(sel) {
+  if (sel.multiple && sel.dataset.multi) { melhorarMulti(sel); return; }
   if (sel.dataset.tema || sel.multiple || sel.size > 1) return;
   sel.dataset.tema = '1';
   const btn = document.createElement('button');
@@ -165,6 +166,84 @@ function melhorarSelect(sel) {
       } else if (e.key === 'Home' || e.key === 'End') {
         e.preventDefault();
         (e.key === 'Home' ? botoes[0] : botoes[botoes.length - 1]).focus();
+      } else if (e.key === 'Tab') {
+        fechar({ devolverFoco: false });
+      }
+    });
+  };
+  btn.addEventListener('click', abrir);
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); abrir(); }
+  });
+}
+
+// ---------- <select multiple data-multi> ----------
+// Lista com marcação: escolhe um, vários ou todos (a primeira opção, de valor vazio, é "todos").
+// As marcações valem ao fechar a lista, num único `change`.
+function melhorarMulti(sel) {
+  if (sel.dataset.tema) return;
+  sel.dataset.tema = '1';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `sel-btn ${sel.className}`;
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  const rotulo = sel.getAttribute('aria-label') || '';
+  if (rotulo) btn.setAttribute('aria-label', rotulo);
+  sel.after(btn);
+  sel.classList.add('sel-nativo');
+  sel.tabIndex = -1;
+  sel.setAttribute('aria-hidden', 'true');
+
+  const ops = () => [...sel.options];
+  const marcados = () => ops().filter((o) => o.value && o.selected);
+  const pintar = () => {
+    const m = marcados();
+    const txt = !m.length ? ops()[0]?.text || '' : m.length <= 2 ? m.map((o) => o.text).join(', ') : `${m.length} ${sel.dataset.multi}`;
+    btn.innerHTML = `<span class="sel-txt">${esc(txt)}</span>${SETA}`;
+  };
+  sel.addEventListener('change', pintar);
+  new MutationObserver(pintar).observe(sel, { childList: true, subtree: true });
+  pintar();
+
+  const abrir = () => {
+    const antes = marcados().map((o) => o.value).join('|');
+    const lista = document.createElement('div');
+    lista.className = 'sel-lista';
+    lista.setAttribute('role', 'listbox');
+    lista.setAttribute('aria-multiselectable', 'true');
+    if (rotulo) lista.setAttribute('aria-label', rotulo);
+    const desenhar = () => {
+      const nenhum = !marcados().length;
+      lista.innerHTML = (rotulo && celular() ? `<div class="sel-titulo">${esc(rotulo)}</div>` : '')
+        + ops().map((o, i) => {
+          const sim = o.value ? o.selected : nenhum;
+          return `<button type="button" role="option" class="sel-op sel-marca" data-i="${i}" aria-selected="${sim}"><span><i class="sel-caixa">${sim ? CHECK : ''}</i>${esc(o.text)}</span></button>`;
+        }).join('');
+    };
+    desenhar();
+    const { painel, fechar } = abrirPainel(btn, lista, {
+      classe: 'lista',
+      aoFechar: () => {
+        if (marcados().map((o) => o.value).join('|') !== antes) sel.dispatchEvent(new Event('change', { bubbles: true }));
+      },
+    });
+    painel.querySelector('.sel-op')?.focus({ preventScroll: true });
+    painel.addEventListener('click', (e) => {
+      const b = e.target.closest('.sel-op');
+      if (!b) return;
+      const o = sel.options[Number(b.dataset.i)];
+      if (!o.value) ops().forEach((x) => { x.selected = false; });
+      else o.selected = !o.selected;
+      desenhar();
+      painel.querySelector(`.sel-op[data-i="${b.dataset.i}"]`)?.focus({ preventScroll: true });
+    });
+    painel.addEventListener('keydown', (e) => {
+      const botoes = [...painel.querySelectorAll('.sel-op')];
+      const i = botoes.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        botoes[(i + (e.key === 'ArrowDown' ? 1 : -1) + botoes.length) % botoes.length].focus();
       } else if (e.key === 'Tab') {
         fechar({ devolverFoco: false });
       }

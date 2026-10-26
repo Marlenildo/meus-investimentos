@@ -650,6 +650,11 @@ html, body { overflow-x: clip; }
 .sel-op svg { width: 17px; height: 17px; flex: none; }
 .sel-op:disabled { opacity: 0.4; cursor: default; }
 .sel-titulo { font: 700 0.95rem var(--f-display); padding: 4px 12px 10px; }
+.sel-marca[aria-selected="true"] { background: none; }
+.sel-marca[aria-selected="true"]:hover, .sel-marca[aria-selected="true"]:focus-visible { background: var(--folha-2); }
+.sel-caixa { width: 18px; height: 18px; flex: none; display: grid; place-items: center; border-radius: 5px; border: 1.5px solid var(--linha-forte); color: #fff; }
+.sel-marca[aria-selected="true"] .sel-caixa { background: var(--violeta); border-color: var(--violeta); }
+.sel-op .sel-caixa svg { width: 13px; height: 13px; }
 
 /* calendário */
 .sel-cal { padding: 12px; display: grid; gap: 8px; }
@@ -724,6 +729,18 @@ html, body { overflow-x: clip; }
 /* filtro por ativo no Histórico */
 .graf-ativo-nome { color: var(--violeta); }
 .graf-controles .sel-btn.peq { max-width: 170px; }
+.grafico text.tk { fill: var(--tinta-2); font: 600 9.5px var(--f-texto); letter-spacing: -0.01em; }
+.grafico .slot.sel text.tk { fill: var(--tinta); }
+.grafico text.v2.prov-tk { fill: var(--pv-div); font-size: 9px; font-weight: 600; }
+.det-ativos { display: grid; grid-template-columns: minmax(90px, auto) repeat(var(--cols, 1), auto); gap: 6px 18px; margin-top: 10px; font-size: 0.86rem; color: var(--tinta-2); align-items: center; justify-content: start; }
+.det-ativos.com-prov, .det-ativos.com-vale { --cols: 2; }
+.det-ativos.com-prov.com-vale { --cols: 3; }
+.det-ativos .num { text-align: right; font-variant-numeric: tabular-nums; }
+.det-ativos b { color: var(--tinta); font-weight: 600; }
+.det-ativos b.var-alta { color: var(--alta); }
+.det-ativos-cab { font-size: 0.74rem; color: var(--tinta-3); text-align: right; }
+.det-ativos-cab:first-child { text-align: left; }
+.det-ativo-nome { display: inline-flex; align-items: center; gap: 7px; color: var(--tinta); font-weight: 600; }
 .det-itens .det-soma { color: var(--tinta-2); border-left: 1px solid var(--linha); padding-left: 10px; }
 
 /* acumulado: investido + valorização + proventos = total */

@@ -14,7 +14,7 @@ import './seletores.js';
 
 // ---------- estado ----------
 // versão do app (mostrada no rodapé): suba a cada mudança publicada
-export const VERSAO = '1.14.2';
+export const VERSAO = '1.14.3';
 const VERSAO_DATA = '2026-10-26';
 
 let S = carregar();
@@ -1313,7 +1313,9 @@ function graficoPorAtivo({ chaves, per, acum, pilha, comProv, comTaxa, simples, 
           prov += `<rect class="seg ${k2 === 'prov' ? 's-prov' : `pv-${k2}`}" x="${xProv}" y="${y(ap + v)}" width="${wProv}" height="${Math.max(0.5, y(ap) - y(ap + v))}"/>`;
           ap += v;
         }
-        corpo += `<clipPath id="cq${i}-${j}"><rect x="${xProv}" y="${y(p.prov)}" width="${wProv}" height="${y(0) - y(p.prov) + 4}" rx="3"/></clipPath><g clip-path="url(#cq${i}-${j})">${prov}</g>`;
+        // provento pequeno perto do investido: um traço de 3px, para não sumir
+        if (y(0) - y(p.prov) < 3) prov = `<rect class="seg ${tipos[0]?.[0] && tipos[0][0] !== 'prov' ? `pv-${tipos[0][0]}` : 's-prov'}" x="${xProv}" y="${y(0) - 3}" width="${wProv}" height="3"/>`;
+        corpo += `<clipPath id="cq${i}-${j}"><rect x="${xProv}" y="${Math.min(y(p.prov), y(0) - 3)}" width="${wProv}" height="${Math.max(y(0) - y(p.prov), 3) + 4}" rx="3"/></clipPath><g clip-path="url(#cq${i}-${j})">${prov}</g>`;
       }
       // valores em cima e o nome do ativo embaixo
       const yTopo = Math.min(topoInv, y(p.prov));
